@@ -40,6 +40,7 @@
 
 #define FORCE_INLINE __always_inline
 
+
 /* LZ4_FORCE_O2_GCC_PPC64LE and LZ4_FORCE_O2_INLINE_GCC_PPC64LE
  * gcc on ppc64le generates an unrolled SIMDized loop for LZ4_wildCopy8,
  * together with a simple 8-byte copy loop as a fall-back path.
@@ -61,6 +62,7 @@
 #  define FORCE_O2_GCC_PPC64LE		FORCE_INLINE
 #  define FORCE_O2_INLINE_GCC_PPC64LE	FORCE_INLINE
 #endif
+
 
 /*-************************************
  *	Basic Types
@@ -140,6 +142,7 @@ typedef struct _U64_S { u64 v; } U64_S;
 #define WILDCOPYLENGTH 8
 #define LASTLITERALS 5
 #define MFLIMIT (WILDCOPYLENGTH + MINMATCH)
+
 /*
  * ensure it's possible to write 2 x wildcopyLength
  * without overflowing output buffer
@@ -205,6 +208,7 @@ static FORCE_INLINE void LZ4_writeLE16(void *memPtr, U16 value)
 	return put_unaligned_le16(value, memPtr);
 }
 
+
 /*
  * LZ4 relies on memcpy with a constant size being inlined. In freestanding
  * environments, the compiler can't assume the implementation of memcpy() is
@@ -235,7 +239,10 @@ static FORCE_INLINE void LZ4_copy8(void *dst, const void *src)
  * customized variant of memcpy,
  * which can overwrite up to 7 bytes beyond dstEnd
  */
+
 static FORCE_O2_INLINE_GCC_PPC64LE void LZ4_wildCopy8(void *dstPtr,
+static FORCE_INLINE void LZ4_wildCopy(void *dstPtr,
+
 	const void *srcPtr, void *dstEnd)
 {
 	BYTE *d = (BYTE *)dstPtr;
@@ -332,6 +339,7 @@ static FORCE_INLINE unsigned read_variable_length(const BYTE **ip,
 	return length;
 }
 
+
 typedef enum { noLimit = 0, limitedOutput = 1 } limitedOutput_directive;
 typedef enum { byPtr, byU32, byU16 } tableType_t;
 
@@ -342,5 +350,7 @@ typedef enum { endOnOutputSize = 0, endOnInputSize = 1 } endCondition_directive;
 typedef enum { decode_full_block = 0, partial_decode = 1 } earlyEnd_directive;
 
 #define LZ4_STATIC_ASSERT(c)	BUILD_BUG_ON(!(c))
+typedef enum { full = 0, partial = 1 } earlyEnd_directive;
+
 
 #endif
