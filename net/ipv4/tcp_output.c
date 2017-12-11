@@ -2451,13 +2451,13 @@ bool tcp_schedule_loss_probe(struct sock *sk, bool advancing_rto)
 	/* Schedule a loss probe in 2*RTT for SACK capable connections
 	 * not in loss recovery, that are either limited by cwnd or application.
 	 */
-	if ((sysctl_tcp_early_retrans != 3 && sysctl_tcp_early_retrans != 4) ||
-	    !tp->packets_out ||
+	if (sysctl_tcp_early_retrans < 3 || !tp->packets_out ||
+	    !tcp_is_sack(tp) ||
 	    (inet_csk(sk)->icsk_ca_state != TCP_CA_Open &&
 	     inet_csk(sk)->icsk_ca_state != TCP_CA_CWR))
 		return false;
 
-	/* Probe timeout is 2*rtt. Add minimum RTO to account
+	/* Probe timeout is at least 1.5*rtt + TCP_DELACK_MAX to account
 	 * for delayed ack when there's one outstanding packet. If no RTT
 	 * sample is available then probe after TCP_TIMEOUT_INIT.
 	 */
