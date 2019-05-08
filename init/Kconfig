@@ -1290,6 +1290,7 @@ config CPUSET_TOP_APP
 
 endif
 
+
 config STUNE_ASSIST
 	bool "SchedTune configuration helper"
 	depends on SCHED_TUNE
