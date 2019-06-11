@@ -1216,9 +1216,25 @@ config SCHED_TUNE
 
 	  If unsure, say N.
 
+ 
+config CPUSETS_ASSIST
+	bool "Cpusets configuration helper"
+	depends on CPUSETS
+	depends on ANDROID
+	help
+	  This option enables the configuration of default cpusets
+	  parameters from kernel.
+
+	  If unsure, say N.
+
+config STUNE_ASSIST
+	bool "SchedTune configuration helper"
+	depends on SCHED_TUNE
+	depends on ANDROID
+
 config SCHED_EMS
 	bool "Exynos Mobile Scheduler"
-	depends on SMP
+	depends on SMP 
 	help
 	  This option supports Exynos mobile scheduler. It is designed to
 	  secure the limits of energy aware scheduler. This option provides
