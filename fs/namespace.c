@@ -2091,57 +2091,19 @@ static int can_umount(const struct path *path, int flags)
 	return 0;
 }
 // caller is responsible for flags being sane
-int path_umount(struct path *path, int flags)
+static int path_umount(struct path *path, int flags)
 {
-	struct mount *mnt = real_mount(path->mnt);
-	int ret;
-	ret = can_umount(path, flags);
-	if (!ret)
-		ret = do_umount(mnt, flags);
-	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
-	dput(path->dentry);
-	mntput_no_expire(mnt);
-	return ret;
-}
-
-/*
- * Now umount can handle mount points as well as block devices.
- * This is important for filesystems which use unnamed block devices.
- *
- * We now support a flag for forced unmount like the other 'big iron'
- * unixes. Our API is identical to OSF/1 to avoid making a mess of AMD
- */
-
-#ifdef CONFIG_PAGE_BOOST_RECORDING
-#include <linux/io_record.h>
-#endif
-
-SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
-{
-	struct path path;
 	struct mount *mnt;
 	int retval;
-	int lookup_flags = 0;
-	bool user_request = !(current->flags & PF_KTHREAD);
 
 	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
 		return -EINVAL;
-
 	if (!may_mount())
 		return -EPERM;
 
-#ifdef CONFIG_PAGE_BOOST_RECORDING
-	forced_init_record();
-#endif
-	if (!(flags & UMOUNT_NOFOLLOW))
-		lookup_flags |= LOOKUP_FOLLOW;
-
-	retval = user_path_mountpoint_at(AT_FDCWD, name, lookup_flags, &path);
-	if (retval)
-		goto out;
-	mnt = real_mount(path.mnt);
+	mnt = real_mount(path->mnt);
 	retval = -EINVAL;
-	if (path.dentry != path.mnt->mnt_root)
+	if (path->dentry != path->mnt->mnt_root)
 		goto dput_and_out;
 	if (!check_mnt(mnt))
 		goto dput_and_out;
@@ -2156,34 +2118,12 @@ SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
 	if (flags & MNT_FORCE && !capable(CAP_SYS_ADMIN))
 		goto dput_and_out;
 
-	/* flush delayed_fput to put mnt_count */
-	if (user_request)
-		flush_delayed_fput_wait();
-
 	retval = do_umount(mnt, flags);
 dput_and_out:
 	/* we mustn't call path_put() as that would clear mnt_expiry_mark */
-	dput(path.dentry);
+	dput(path->dentry);
 	mntput_no_expire(mnt);
-	if (!retval)
-		sys_umount_trace_print(mnt, flags);
-
-	if (!user_request)
-		goto out;
-
-	if (!retval) {
-		/*
-		 * If the last delayed_fput() is called during do_umount()
-		 * and makes mnt_count zero, we need to guarantee to register
-		 * delayed_mntput by waiting for delayed_fput work again.
-		 */
-		flush_delayed_fput_wait();
-
-		/* flush delayed_mntput_work to put sb->s_active */
-		flush_delayed_mntput_wait();
-	}
 	if (!retval || (flags & MNT_FORCE)) {
-		/* filesystem needs to handle unclosed namespaces */
 #ifdef CONFIG_RKP_NS_PROT
 		if (mnt->mnt->mnt_sb->s_op->umount_end)
 			mnt->mnt->mnt_sb->s_op->umount_end(mnt->mnt->mnt_sb, flags);
@@ -2192,10 +2132,27 @@ dput_and_out:
 			mnt->mnt.mnt_sb->s_op->umount_end(mnt->mnt.mnt_sb, flags);
 #endif
 	}
-out:
 	return retval;
 }
 
+int ksys_umount(char __user *name, int flags)
+{
+	int lookup_flags = 0;
+	struct path path;
+	int ret;
+
+	if (!(flags & UMOUNT_NOFOLLOW))
+		lookup_flags |= LOOKUP_FOLLOW;
+	ret = user_path_mountpoint_at(AT_FDCWD, name, lookup_flags, &path);
+	if (ret)
+		return ret;
+	return path_umount(&path, flags);
+}
+
+SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
+{
+	return ksys_umount(name, flags);
+}
 #ifdef __ARCH_WANT_SYS_OLDUMOUNT
 
 /*
