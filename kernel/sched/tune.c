@@ -392,14 +392,6 @@ schedtune_margin(unsigned long capacity, unsigned long signal, long boost)
 {
 	long long margin = 0;
 
-	/*
-	 * Signal proportional compensation (SPC)
-	 *
-	 * The Boost (B) value is used to compute a Margin (M) which is
-	 * proportional to the complement of the original Signal (S):
-	 *   M = B * (CAPACITY - S)
-	 * The obtained M could be used by the caller to "boost" S.
-	 */
 	if (boost >= 0) {
 		margin  = capacity - signal;
 		margin *= boost;
@@ -413,23 +405,20 @@ schedtune_margin(unsigned long capacity, unsigned long signal, long boost)
 	return margin;
 }
 
-static inline int schedtune_adj_ta(struct schedtune *st, struct task_struct *p)
+static inline bool schedtune_adj_ta(struct schedtune *st, struct task_struct *p)
 {
 	char name_buf[NAME_MAX + 1];
 	int adj = p->signal->oom_score_adj;
 
-	if (adj != 0)
-		return 0;
-
-	if (p->flags & PF_KTHREAD)
-		return 0;
-
 	cgroup_name(st->css.cgroup, name_buf, sizeof(name_buf));
 	if (!strncmp(name_buf, "top-app", strlen("top-app"))) {
-		return 10;
+		if ((adj == 0) && !(p->flags & PF_KTHREAD)) {
+			pr_debug("top app is %s\n", p->comm);
+			return true;
+		}
 	}
 
-	return 0;
+	return false;
 }
 
 inline int
@@ -470,20 +459,17 @@ int schedtune_task_group_idx(struct task_struct *p)
 	if (unlikely(!schedtune_initialized))
 		return 0;
 
-	/* Get task cgroup idx */
 	rcu_read_lock();
 	st = task_schedtune(p);
 	group_idx = st->idx;
 	rcu_read_unlock();
 
-	/* if group idx goes beyond allowed, return root */
 	if (group_idx >= CGROUP_COUNT)
 		group_idx = 0;
 
 	return group_idx;
 }
 #endif
-
 int schedtune_task_boost(struct task_struct *p)
 {
 	struct schedtune *st;
@@ -495,7 +481,7 @@ int schedtune_task_boost(struct task_struct *p)
 	/* Get task boost value */
 	rcu_read_lock();
 	st = task_schedtune(p);
-	task_boost = max(st->boost, schedtune_adj_ta(st, p));
+	task_boost = st->boost || schedtune_adj_ta(st, p);
 	rcu_read_unlock();
 
 	return task_boost;
@@ -514,7 +500,7 @@ int schedtune_task_boost_rcu_locked(struct task_struct *p)
 
 	/* Get task boost value */
 	st = task_schedtune(p);
-	task_boost = max(st->boost, schedtune_adj_ta(st, p));
+	task_boost = st->boost || schedtune_adj_ta(st, p);
 
 	return task_boost;
 }
