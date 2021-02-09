@@ -660,6 +660,28 @@ show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
 show_one(scaling_min_freq, min);
 show_one(scaling_max_freq, max);
 
+static ssize_t show_cpu_freq_lock(struct cpufreq_policy *policy, char *buf)
+{
+	return sprintf(buf, "%u\n", policy->user_policy_locked ? 1 : 0);
+}
+
+static ssize_t store_cpu_freq_lock(struct cpufreq_policy *policy, const char *buf, size_t count)
+{
+	unsigned int val;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &val);
+	if (ret)
+		return -EINVAL;
+
+	if (val == 0)
+		policy->user_policy_locked = false;
+	else if (val == 1 && policy->user_policy.max > 0)
+		policy->user_policy_locked = true;
+
+	return count;
+}
+
 unsigned int cpuinfo_max_freq_cached;
 
 static bool should_use_cached_freq(int cpu)
@@ -967,6 +989,7 @@ cpufreq_freq_attr_ro(related_cpus);
 cpufreq_freq_attr_ro(affected_cpus);
 cpufreq_freq_attr_rw(scaling_min_freq);
 cpufreq_freq_attr_rw(scaling_max_freq);
+cpufreq_freq_attr_rw(cpu_freq_lock);
 cpufreq_freq_attr_rw(scaling_governor);
 cpufreq_freq_attr_rw(scaling_setspeed);
 
@@ -976,6 +999,7 @@ static struct attribute *default_attrs[] = {
 	&cpuinfo_transition_latency.attr,
 	&scaling_min_freq.attr,
 	&scaling_max_freq.attr,
+	&cpu_freq_lock.attr,
 	&affected_cpus.attr,
 	&related_cpus.attr,
 	&scaling_governor.attr,
