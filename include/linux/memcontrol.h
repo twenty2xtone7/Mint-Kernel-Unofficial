@@ -212,6 +212,7 @@ struct mem_cgroup {
 	int		oom_kill_disable;
 
 	/* memory.events */
+	atomic_long_t memory_events[MEMCG_NR_MEMORY_EVENTS];
 	struct cgroup_file events_file;
 
 	/* protect arrays of thresholds */
@@ -765,8 +766,9 @@ static inline bool mem_cgroup_disabled(void)
 
 static inline void memcg_memory_event(struct mem_cgroup *memcg,
 				      enum memcg_memory_event event)
-{
+{  
 }
+
 
 static inline void memcg_memory_event_mm(struct mm_struct *mm,
 					 enum memcg_memory_event event)
