@@ -88,7 +88,6 @@ config ZRAM_MEMORY_TRACKING
 
 	  See Documentation/blockdev/zram.txt for more information.
 
-
 config ZRAM_LRU_WRITEBACK
 	bool
 	depends on ZRAM_WRITEBACK
@@ -100,3 +99,12 @@ config ZRAM_LRU_WRITEBACK_LIMIT
 	int "Limit zram lru writeback"
 	default 5120
 	depends on ZRAM_LRU_WRITEBACK
+
+config ZRAM_DEFAULT_COMP_ALGORITHM
+	string "Default ZRAM algorithm"
+	default "lz4"
+
+config ZRAM_SIZE_OVERRIDE
+	int "zram size to set from kernel"
+	range 1 8
+	default 2
