@@ -2607,9 +2607,34 @@ static void dw_mci_tasklet_func(unsigned long priv)
 			}
 
 			if (cmd->data && err) {
-				dw_mci_fifo_reset(host->dev, host);
-				dw_mci_stop_dma(host);
+				/*
+				 * During UHS tuning sequence, sending the stop
+				 * command after the response CRC error would
+				 * throw the system into a confused state
+				 * causing all future tuning phases to report
+				 * failure.
+				 *
+				 * In such case controller will move into a data
+				 * transfer state after a response error or
+				 * response CRC error. Let's let that finish
+				 * before trying to send a stop, so we'll go to
+				 * STATE_SENDING_DATA.
+				 *
+				 * Although letting the data transfer take place
+				 * will waste a bit of time (we already know
+				 * the command was bad), it can't cause any
+				 * errors since it's possible it would have
+				 * taken place anyway if this tasklet got
+				 * delayed. Allowing the transfer to take place
+				 * avoids races and keeps things simple.
+				 */
+				if (err != -ETIMEDOUT) {
+					state = STATE_SENDING_DATA;
+					continue;
+				}
+
 				send_stop_abort(host, data);
+				dw_mci_stop_dma(host);
 				state = STATE_SENDING_STOP;
 				dw_mci_debug_req_log(host, host->mrq, STATE_REQ_CMD_PROCESS, state);
 				break;
@@ -2635,11 +2660,12 @@ static void dw_mci_tasklet_func(unsigned long priv)
 			 * transfer complete; stopping the DMA and sending an
 			 * abort won't hurt.
 			 */
-			if (test_and_clear_bit(EVENT_DATA_ERROR, &host->pending_events)) {
-				dw_mci_fifo_reset(host->dev, host);
-				dw_mci_stop_dma(host);
-				if (!(host->data_status & (SDMMC_INT_DRTO | SDMMC_INT_EBE)))
+			if (test_and_clear_bit(EVENT_DATA_ERROR,
+					       &host->pending_events)) {
+				if (!(host->data_status & (SDMMC_INT_DRTO |
+							   SDMMC_INT_EBE)))
 					send_stop_abort(host, data);
+				dw_mci_stop_dma(host);
 				state = STATE_DATA_ERROR;
 				dw_mci_debug_req_log(host,
 						     host->mrq, STATE_REQ_DATA_PROCESS, state);
@@ -2672,11 +2698,12 @@ static void dw_mci_tasklet_func(unsigned long priv)
 			 *
 			 * This has the advantage of sending the stop command.
 			 */
-			if (test_and_clear_bit(EVENT_DATA_ERROR, &host->pending_events)) {
-				dw_mci_fifo_reset(host->dev, host);
-				dw_mci_stop_dma(host);
-				if (!(host->data_status & (SDMMC_INT_DRTO | SDMMC_INT_EBE)))
+			if (test_and_clear_bit(EVENT_DATA_ERROR,
+					       &host->pending_events)) {
+				if (!(host->data_status & (SDMMC_INT_DRTO |
+							   SDMMC_INT_EBE)))
 					send_stop_abort(host, data);
+				dw_mci_stop_dma(host);
 				state = STATE_DATA_ERROR;
 				dw_mci_debug_req_log(host, host->mrq,
 						     STATE_REQ_DATA_PROCESS, state);
