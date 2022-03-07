@@ -2481,5 +2481,4 @@ static inline void sk_pacing_shift_update(struct sock *sk, int val)
 		return;
 	WRITE_ONCE(sk->sk_pacing_shift, val);
 }
-
 #endif	/* _SOCK_H */
