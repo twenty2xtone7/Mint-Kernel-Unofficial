@@ -41,6 +41,8 @@
 #define _SOCK_H
 
 #include <linux/hardirq.h>
+
+#define SKB_FRAG_PAGE_ORDER 0
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/list_nulls.h>
