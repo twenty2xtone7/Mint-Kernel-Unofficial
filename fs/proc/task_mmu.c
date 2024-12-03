@@ -538,22 +538,31 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
 	unsigned long start, end;
 	dev_t dev = 0;
 	const char *name = NULL;
-	struct dentry *dentry;
 
 	if (file) {
 		struct inode *inode = file_inode(file);
+		struct dentry *dentry = file->f_path.dentry;
+
 		dev = inode->i_sb->s_dev;
 		ino = inode->i_ino;
 #ifdef CONFIG_NOMOUNT
 		nomount_spoof_mmap_metadata(inode, &dev, &ino);
 #endif
 		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
-		dentry = file->f_path.dentry;
 
-		if (dentry && strstr(dentry->d_name.name, "lineage")) {
-			show_vma_header_prefix(m, vma->vm_start, vma->vm_end, flags, pgoff, dev, ino);
-			name = "/dev/ashmem (deleted)";
-			goto done;
+		if (dentry) {
+			const char *path = dentry->d_name.name;
+
+			if (strstr(path, "lineage")) {
+				show_vma_header_prefix(m, vma->vm_start, vma->vm_end, flags, pgoff, dev, ino);
+				name = "/dev/ashmem (deleted)";
+				goto done;
+			}
+
+			if (strstr(path, "jit-")) {
+				show_vma_header_prefix(m, vma->vm_start, vma->vm_end, flags, 0, 0, 0);
+				goto done;
+			}
 		}
 	}
 
