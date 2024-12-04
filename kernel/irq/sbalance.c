@@ -58,6 +58,7 @@ struct bal_irq {
 
 struct bal_domain {
 	struct list_head movable_irqs;
+	unsigned long old_total;
 	unsigned int intrs;
 	int cpu;
 };
