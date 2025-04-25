@@ -130,6 +130,21 @@ struct netns_ipv4 {
 	int sysctl_tcp_timestamps;
 	struct inet_timewait_death_row tcp_death_row;
 	int sysctl_max_syn_backlog;
+	int sysctl_tcp_fastopen;
+	const struct tcp_congestion_ops __rcu  *tcp_congestion_control;
+	struct tcp_fastopen_context __rcu *tcp_fastopen_ctx;
+	spinlock_t tcp_fastopen_ctx_lock;
+	unsigned int sysctl_tcp_fastopen_blackhole_timeout;
+	atomic_t tfo_active_disable_times;
+	unsigned long tfo_active_disable_stamp;
+	u8 sysctl_tcp_plb_enabled;
+	u8 sysctl_tcp_plb_idle_rehash_rounds;
+	u8 sysctl_tcp_plb_rehash_rounds;
+	u8 sysctl_tcp_plb_suspend_rto_sec;
+	int sysctl_tcp_plb_cong_thresh;
+
+	int sysctl_udp_wmem_min;
+	int sysctl_udp_rmem_min;
 
 #ifdef CONFIG_NET_L3_MASTER_DEV
 	int sysctl_udp_l3mdev_accept;
