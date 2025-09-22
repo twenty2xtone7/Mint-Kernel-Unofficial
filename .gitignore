@@ -32,6 +32,7 @@
 *.o.*
 *.order
 *.patch
+*.txt
 *.s
 *.so
 *.so.dbg
@@ -222,4 +223,5 @@ net/ipv4/tcp_plb.c
 scripts/kconfig/mconf
 sdfc.sh
 arch/arm64/configs/exynos9610-a50_core_defconfig
+
 
