@@ -72,7 +72,6 @@ struct scan_control {
 
 #ifdef CONFIG_WORKINGSET_PROTECTION
 	/* The anonymous pages on the current node are below vm.anon_low_ratio */
-	unsigned int anon_below_low:1;
 	/* The anonymous pages on the current node are below vm.anon_min_ratio */
 	unsigned int anon_below_min:1;
 	/* The clean file pages on the current node are below vm.clean_low_ratio */
