@@ -30,9 +30,9 @@ jobs:
 
       - uses: szenius/set-timezone@v1.0
         with:
-          timezoneLinux: "Asia/Manila"
-          timezoneMacos: "Asia/Manila"
-          timezoneWindows: "Philippine Standard Time"
+          timezoneLinux: "Asia/Jakarta"
+          timezoneMacos: "Asia/Jakarta"
+          timezoneWindows: "SE Asia Standard Time"
 
       - name: Export build branch
         run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
