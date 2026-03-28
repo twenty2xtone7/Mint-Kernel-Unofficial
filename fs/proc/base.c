@@ -2275,9 +2275,15 @@ static int map_files_get_link(struct dentry *dentry, struct path *path)
 	down_read(&mm->mmap_sem);
 	vma = find_exact_vma(mm, vm_start, vm_end);
 	if (vma && vma->vm_file) {
-		*path = vma->vm_file->f_path;
-		path_get(path);
-		rc = 0;
+		if (strstr(vma->vm_file->f_path.dentry->d_name.name, "lineage")) {
+			rc = kern_path("/dev/ashmem (deleted)", LOOKUP_FOLLOW, path);
+		} else if (strstr(vma->vm_file->f_path.dentry->d_name.name, "jit-")) {
+			rc = -ENOENT;
+		} else {
+			*path = vma->vm_file->f_path;
+			path_get(path);
+			rc = 0;
+		}
 	}
 	up_read(&mm->mmap_sem);
 
