@@ -71,7 +71,7 @@ struct scan_control {
 	gfp_t gfp_mask;
 
 #ifdef CONFIG_WORKINGSET_PROTECTION
-	/* The anonymous pages on the current node are below vm.anon_low_ratio */
+/* The anonymous pages on the current node are below vm.anon_low_ratio */
 	/* The anonymous pages on the current node are below vm.anon_min_ratio */
 	unsigned int anon_below_min:1;
 	/* The clean file pages on the current node are below vm.clean_low_ratio */
@@ -2612,6 +2612,7 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
     enum lru_list lru;
     u64 fraction[ANON_AND_FILE];
     prepare_workingset_protection(pgdat, sc); 
+
 
 
 

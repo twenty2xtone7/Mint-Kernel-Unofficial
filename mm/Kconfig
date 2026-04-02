@@ -712,9 +712,21 @@ config HPA
 	  Swapping anonymous pages out to memory can be efficient enough to justify
 	  treating anonymous and file backed pages equally.
 
+config WORKINGSET_PROTECTION
+	bool "sysctl knobs for protecting the working set"
+	depends on SYSCTL
+	default y
+	help
+	  The kernel does not provide a way to protect the working set under memory pressure. 
+	  A certain amount of anonymous and clean file pages is required by
+	  the userspace for normal operation. First of all, the userspace needs 
+	  a cache of shared libraries and executable binaries. If the amount of the
+	  clean file pages falls below a certain level, then thrashing and even
+	  livelock can take place.
+
 config ANON_LOW_RATIO
 	int "Default value for vm.anon_low_ratio"
-	depends on SYSCTL
+	depends on WORKINGSET_PROTECTION
 	range 0 100
 	default 0
 	help
@@ -733,7 +745,7 @@ config ANON_LOW_RATIO
 
 config ANON_MIN_RATIO
 	int "Default value for vm.anon_min_ratio"
-	depends on SYSCTL
+	depends on WORKINGSET_PROTECTION
 	range 0 100
 	default 15
 	help
@@ -751,7 +763,7 @@ config ANON_MIN_RATIO
 
 config CLEAN_LOW_RATIO
 	int "Default value for vm.clean_low_ratio"
-	depends on SYSCTL
+	depends on WORKINGSET_PROTECTION
 	range 0 100
 	default 0
 	help
@@ -773,7 +785,7 @@ config CLEAN_LOW_RATIO
 
 config CLEAN_MIN_RATIO
 	int "Default value for vm.clean_min_ratio"
-	depends on SYSCTL
+	depends on WORKINGSET_PROTECTION
 	range 0 100
 	default 15
 	help
