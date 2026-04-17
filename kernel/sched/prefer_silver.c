@@ -15,6 +15,7 @@ int sysctl_heavy_task_thresh = 50;
 int sysctl_cpu_util_thresh = 85;
 int sysctl_silver_trigger_freq = 1503000;
 
+
 /*
  * Pre-built bitmap of silver cores (cluster_id == 0).
  * Built once at late init, used to skip non-silver CPUs
@@ -65,7 +66,7 @@ unsigned long ps_cpu_util(int cpu)
 {
 #ifdef CONFIG_SCHED_WALT
 	if (likely(sched_ravg_window > 0)) {
-		u64 walt_cpu_util = cpu_rq(cpu)->cumulative_runnable_avg;
+		u64 walt_cpu_util = cpu_rq(cpu)->walt_stats.cumulative_runnable_avg_scaled;
 
 		walt_cpu_util <<= SCHED_CAPACITY_SHIFT;
 		do_div(walt_cpu_util, sched_ravg_window);
@@ -95,32 +96,25 @@ bool prefer_silver_check_cpu_util(int cpu)
 
 int find_best_silver_cpu(struct task_struct *p)
 {
-	struct cpumask _silver_allowed;
-	int cpu, best_cpu = -1;
+	int i, best_cpu = -1;
 	unsigned long min_util = ULONG_MAX;
 
-	cpumask_and(&_silver_allowed, to_cpumask(silver_core_mask),
-		    p->cpus_ptr);
-
-	for_each_cpu(cpu, &_silver_allowed) {
+	for_each_cpu(i, p->cpus_ptr) {
 		unsigned long cur_util;
 
-		if (!prefer_silver_check_freq(cpu))
+		if (cpu_topology[i].package_id != 0)
 			continue;
 
-		cur_util = ps_cpu_util(cpu);
-
-		if ((capacity_orig_of(cpu) * sysctl_cpu_util_thresh) <=
-		    (cur_util * 100))
+		if (!prefer_silver_check_freq(i))
 			continue;
 
+		if (!prefer_silver_check_cpu_util(i))
+			continue;
+
+		cur_util = ps_cpu_util(i);
 		if (cur_util < min_util) {
 			min_util = cur_util;
-			best_cpu = cpu;
-
-			if (cur_util == 0)
-				break;
-		}
+			best_cpu = i;
 	}
 	return best_cpu;
 }

@@ -377,7 +377,7 @@ static struct ctl_table kern_table[] = {
 	},
 	{
 		.procname       = "sched_cpu_high_irqload",
-		.data           = &sysctl_sched_walt_cpu_high_irqload,
+		.data           = &sysctl_sched_cpu_high_irqload,
 		.maxlen         = sizeof(unsigned int),
 		.mode           = 0644,
 		.proc_handler   = proc_dointvec,
@@ -626,7 +626,6 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 #endif
-
 	{
 		.procname	= "sched_latency_ns",
 		.data		= &sysctl_sched_latency,
