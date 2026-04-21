@@ -3303,7 +3303,7 @@
 		g3d_genpd_name = "pd-g3d"; /*KC, RM: pd-g3d, LT,MK: pd-embedded_g3d*/
         #cooling-cells = <2>; /* min followed by max */
 		governor = "interactive";
-		interactive_info = <764000 65 0>;
+		interactive_info = <1053000 55 0>;
 		gpu_dvfs_table_size = <11 7>; /*<row col>*/
 		/*  8 columns      freq  down   up  stay  mif    little  middle   big  */
 		gpu_dvfs_table = <  1053000    95  100   1  2093000 1638000       0
@@ -3323,7 +3323,7 @@
 		gpu_pmu_status_local_pwr_mask = <0xF>; /*0x1 << 0*/
 		gpu_max_clock = <1053000>;
 		gpu_max_clock_limit = <1053000>;
-		gpu_min_clock = <260000>;
+		gpu_min_clock = <949000>;
 		gpu_dvfs_start_clock = <260000>;
 		gpu_dvfs_bl_config_clock = <260000>;
 		gpu_default_voltage = <800000>;
@@ -3331,7 +3331,7 @@
 		gpu_voltage_offset_margin = <37500>;
 		gpu_tmu_control = <1>;
 		gpu_temp_throttling_level_num = <6>;
-		gpu_temp_throttling = <764000 572000 455000 338000 260000 260000>;
+		gpu_temp_throttling = <764000 839000 764000 683000 572000 546000>;
 		gpu_power_coeff = <625>;
 		gpu_dvfs_time_interval = <5>; /*1 tick : 10ms*/
 		gpu_default_wakeup_lock = <1>;
