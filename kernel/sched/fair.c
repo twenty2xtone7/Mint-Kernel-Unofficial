@@ -70,6 +70,10 @@ unsigned int normalized_sysctl_sched_latency		= 5000000ULL;
  */
 unsigned int sysctl_sched_sync_hint_enable = 1;
 /*
+ * Enable/disable force load balancing in scheduler.
+ */
+unsigned int sysctl_sched_force_lb_enable = 0;
+/*
  * Enable/disable using cstate knowledge in idle sibling selection
  */
 unsigned int sysctl_sched_cstate_aware = 1;
