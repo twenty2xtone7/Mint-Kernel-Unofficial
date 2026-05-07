@@ -212,3 +212,12 @@ lib/lib.a.symversions
 arch/arm64/lib/lib.a.symversions
 arch/arm/vdso/vdsomunge
 kernel/config_data.h
+build.log
+dfc.sh
+dfco.sh
+include/linux/btf_ids.h
+kabuwild
+net/ipv4/tcp_dctcp.h
+net/ipv4/tcp_plb.c
+scripts/kconfig/mconf
+sdfc.sh

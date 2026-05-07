@@ -14,6 +14,8 @@
 #ifndef __WALT_H
 #define __WALT_H
 
+struct rq_flags;
+
 #ifdef CONFIG_SCHED_WALT
 
 void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int event,
