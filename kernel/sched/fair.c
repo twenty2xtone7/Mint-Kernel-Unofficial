@@ -41,6 +41,7 @@
 
 #ifdef CONFIG_FAST_TRACK
 #include <cpu/ftt/ftt.h>
+#endif
 
 #include "walt.h"
 
