@@ -8077,19 +8077,18 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 	if (sd_overutilized(sd))
 		return false;
 
-	/*
-	 * we cannot do energy-aware wakeup placement sensibly
-	 * for tasks with 0 utilization, so let them be placed
-	 * according to the normal strategy.
-	 * However if fbt is in use we may still benefit from
-	 * the heuristics we use there in selecting candidate
-	 * CPUs.
-	 */
-	if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
-		return false;
+/*
+ * we cannot do energy-aware wakeup placement sensibly
+ * for tasks with 0 utilization, so let them be placed
+ * according to the normal strategy.
+ * However if fbt is in use we may still benefit from
+ * the heuristics we use there in selecting candidate
+ * CPUs.
+ */
+if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
+	return false;
 
-
-	if(!sched_feat(EAS_PREFER_IDLE)){
+if (!sched_feat(EAS_PREFER_IDLE)) {
 
 static DEFINE_PER_CPU(cpumask_t, energy_cpus);
 
