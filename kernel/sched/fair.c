@@ -42,7 +42,6 @@
 #ifdef CONFIG_FAST_TRACK
 #include <cpu/ftt/ftt.h>
 #endif
-
 #include "walt.h"
 
 #include <linux/prefer_silver.h>
@@ -136,7 +135,7 @@ enum sched_tunable_scaling sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_N
  *
  * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_min_granularity		= 625000ULL;
+unsigned int sysctl_sched_min_granularity		= 500000ULL;
 unsigned int normalized_sysctl_sched_min_granularity	= 625000ULL;
 
 /*
@@ -160,10 +159,10 @@ unsigned int sysctl_sched_child_runs_first __read_mostly = 1;
  * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
  * (current: 5 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_wakeup_granularity		= 2500000UL;
+unsigned int sysctl_sched_wakeup_granularity		= 1500000UL;
 unsigned int normalized_sysctl_sched_wakeup_granularity	= 2500000UL;
 
-unsigned int __read_mostly sysctl_sched_migration_cost	= 2000000UL;
+unsigned int __read_mostly sysctl_sched_migration_cost	= 500000UL;
 
 #ifdef CONFIG_SCHED_WALT
 unsigned int sysctl_sched_use_walt_cpu_util = 1;
@@ -8061,7 +8060,7 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 			      int sd_flag, int wake_flags)
 {
 	struct sched_domain *sd = NULL;
-	int sync = wake_flags & WF_SYNC;
+	int sync __maybe_unused = wake_flags & WF_SYNC;
 
 	sd = rcu_dereference_sched(cpu_rq(prev_cpu)->sd);
 
@@ -8077,20 +8076,21 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 	if (sd_overutilized(sd))
 		return false;
 
-/*
- * we cannot do energy-aware wakeup placement sensibly
- * for tasks with 0 utilization, so let them be placed
- * according to the normal strategy.
- * However if fbt is in use we may still benefit from
- * the heuristics we use there in selecting candidate
- * CPUs.
- */
-if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
-	return false;
+	/*
+	 * we cannot do energy-aware wakeup placement sensibly
+	 * for tasks with 0 utilization, so let them be placed
+	 * according to the normal strategy.
+	 * However if fbt is in use we may still benefit from
+	 * the heuristics we use there in selecting candidate
+	 * CPUs.
+	 */
+	if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
+		return false;
 
-if (!sched_feat(EAS_PREFER_IDLE)) {
+	return true;
+}
 
-static DEFINE_PER_CPU(cpumask_t, energy_cpus);
+static DEFINE_PER_CPU(cpumask_t, energy_cpus) __maybe_unused;
 
 /*
  * find_energy_efficient_cpu(): Find most energy-efficient target CPU for the
@@ -8132,6 +8132,12 @@ static DEFINE_PER_CPU(cpumask_t, energy_cpus);
  * let's keep things simple by re-using the existing slow path.
  */
 
+/*
+ * NOTE: This function is unused - find_energy_efficient_cpu below at line 7941
+ * is the actual EAS function that gets called. This version is broken (references
+ * undefined struct perf_domain and rd->pd which don't exist in this kernel).
+ */
+#if 0
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 				     int sync, int sibling_count_hint)
 {
@@ -8153,7 +8159,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	int start_cpu;
 
 	if (is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
-			cpumask_test_cpu(prev_cpu, &p->cpus_allowed))
+			cpumask_test_cpu(prev_cpu, p->cpus_ptr))
 		return prev_cpu;
 
 	start_cpu = get_start_cpu(p);
@@ -8241,6 +8247,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	}
 	return true;
 }
+#endif
 
 /*
  * select_task_rq_fair: Select target runqueue for the waking task in domains
