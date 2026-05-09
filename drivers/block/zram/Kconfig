@@ -105,6 +105,6 @@ config ZRAM_DEFAULT_COMP_ALGORITHM
 	default "lz4"
 
 config ZRAM_SIZE_OVERRIDE
-	int "zram size to set from kernel"
-	range 1 8
-	default 2
+	int "zram size to set from kernel (in MB)"
+	range 256 16384
+	default 2048
