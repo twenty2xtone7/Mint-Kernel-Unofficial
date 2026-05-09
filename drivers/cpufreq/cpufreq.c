@@ -759,7 +759,9 @@ static ssize_t store_scaling_min_freq(struct cpufreq_policy *policy,
 	ret = cpufreq_set_policy(policy, &new_policy);
 	if (!ret) {
 		policy->user_policy.min = freq;
+#ifdef CONFIG_CPU_FREQ_USER_LOCK
 		policy->user_policy_locked = true;
+#endif
 	}
 
 	return ret ? ret : count;
@@ -784,7 +786,9 @@ static ssize_t store_scaling_max_freq(struct cpufreq_policy *policy,
 	ret = cpufreq_set_policy(policy, &new_policy);
 	if (!ret) {
 		policy->user_policy.max = freq;
+#ifdef CONFIG_CPU_FREQ_USER_LOCK
 		policy->user_policy_locked = true;
+#endif
 	}
 
 	return ret ? ret : count;
@@ -1353,7 +1357,9 @@ static int cpufreq_online(unsigned int cpu)
 	if (new_policy) {
 		policy->user_policy.min = policy->min;
 		policy->user_policy.max = policy->max;
+#ifdef CONFIG_CPU_FREQ_USER_LOCK
 		policy->user_policy_locked = false;
+#endif
 
 		for_each_cpu(j, policy->related_cpus) {
 			per_cpu(cpufreq_cpu_data, j) = policy;
@@ -2413,10 +2419,12 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
 
+#ifdef CONFIG_CPU_FREQ_USER_LOCK
 	if (policy->user_policy_locked && policy->user_policy.max > 0) {
 		policy->min = policy->user_policy.max;
 		policy->max = policy->user_policy.max;
 	}
+#endif
 
 	arch_set_max_freq_scale(policy->cpus, policy->max);
 
@@ -2441,7 +2449,9 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 
 	pr_debug("governor switch\n");
 
+#ifdef CONFIG_CPU_FREQ_USER_LOCK
 	policy->user_policy_locked = false;
+#endif
 
 	/* save old, working values */
 	old_gov = policy->governor;
