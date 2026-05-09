@@ -3302,7 +3302,7 @@
         samsung,power-domain = <&pd_g3d>;
 		g3d_genpd_name = "pd-g3d"; /*KC, RM: pd-g3d, LT,MK: pd-embedded_g3d*/
         #cooling-cells = <2>; /* min followed by max */
-		governor = "interactive";
+governor = "performance";
 		interactive_info = <1053000 55 0>;
 		gpu_dvfs_table_size = <11 7>; /*<row col>*/
 		/*  8 columns      freq  down   up  stay  mif    little   middle    big  */
@@ -3316,7 +3316,7 @@
 		                     455000    10   20   1   845000  910000        0
 		                     385000    10   20   1   546000  806000        0
 		                     338000     5   15   1   419000  702000        0
-		                     260000     5   10   1   419000  702000        0 >;
+		                     260000     5   10   1   419000  702000       0 >;
 		gpu_sustainable_info = <0 0 0 0 0>;
 		gpu_pmqos_cpu_cluster_num = <2>;
 		gpu_pmu_status_reg_offset = <0x4064>;
