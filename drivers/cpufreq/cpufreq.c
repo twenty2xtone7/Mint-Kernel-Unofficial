@@ -734,8 +734,11 @@ static ssize_t store_##file_name					\
 									\
 	temp = new_policy.object;					\
 	ret = cpufreq_set_policy(policy, &new_policy);		\
-	if (!ret)							\
+	if (!ret) {							\
 		policy->user_policy.object = temp;			\
+		if (object == max)					\
+			policy->user_policy_locked = true;		\
+	}								\
 									\
 	return ret ? ret : count;					\
 }
@@ -2365,6 +2368,11 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
 
+	if (policy->user_policy_locked) {
+		policy->min = policy->user_policy.max;
+		policy->max = policy->user_policy.max;
+	}
+
 	arch_set_max_freq_scale(policy->cpus, policy->max);
 
 	trace_cpu_frequency_limits(policy->max, policy->min, policy->cpu);
@@ -2387,6 +2395,8 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	}
 
 	pr_debug("governor switch\n");
+
+	policy->user_policy_locked = false;
 
 	/* save old, working values */
 	old_gov = policy->governor;

@@ -92,6 +92,7 @@ struct cpufreq_policy {
 					 * called, but you're in IRQ context */
 
 	struct cpufreq_user_policy user_policy;
+	bool				user_policy_locked; /* user set freq, governor can't override */
 	struct cpufreq_frequency_table	*freq_table;
 	enum cpufreq_table_sorting freq_table_sorted;
 
