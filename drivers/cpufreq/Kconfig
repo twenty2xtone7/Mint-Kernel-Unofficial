@@ -20,7 +20,7 @@ if CPU_FREQ
 
 config CPU_FREQ_USER_LOCK
 	bool "CPU Frequency user lock (keep freq when governor changes)"
-	default n
+	default y
 	help
 	  When enabled, setting scaling_max_freq or scaling_min_freq will lock
 	  the CPU frequency and prevent governors from changing it. The lock

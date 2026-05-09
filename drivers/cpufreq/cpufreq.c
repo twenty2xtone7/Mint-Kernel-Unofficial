@@ -2419,13 +2419,6 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
 
-#ifdef CONFIG_CPU_FREQ_USER_LOCK
-	if (policy->user_policy_locked && policy->user_policy.max > 0) {
-		policy->min = policy->user_policy.max;
-		policy->max = policy->user_policy.max;
-	}
-#endif
-
 	arch_set_max_freq_scale(policy->cpus, policy->max);
 
 	trace_cpu_frequency_limits(policy->max, policy->min, policy->cpu);
