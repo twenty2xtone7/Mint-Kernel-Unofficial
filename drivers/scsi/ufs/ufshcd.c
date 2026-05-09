@@ -6793,7 +6793,7 @@ static int ufshcd_abort(struct scsi_cmnd *cmd)
 		dev_err(hba->dev,
 		"%s: cmd was completed, but without a notifying intr, tag = %d",
 		__func__, tag);
-		goto clean;
+		goto cleanup;
 	}
 
 	/* Print Transfer Request of aborted task */
@@ -9690,7 +9690,7 @@ EXPORT_SYMBOL_GPL(ufshcd_dealloc_host);
 static int ufshcd_set_dma_mask(struct ufs_hba *hba)
 {
 	if (hba->capabilities & MASK_64_ADDRESSING_SUPPORT) {
-		if (!dma_set_mask_and_coherent(hba->dev, DMA_BIT_MASK(64)))
+		if (!dma_set_mask_and_coherent(hba->dev, ~0ULL))
 			return 0;
 	}
 	return dma_set_mask_and_coherent(hba->dev, DMA_BIT_MASK(32));

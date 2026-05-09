@@ -1206,7 +1206,7 @@ static int ncm_unwrap_ntb(struct gether *port,
 	__le16		*tmp = (void *) skb->data;
 	unsigned	index, index2;
 	unsigned	dg_len, dg_len2;
-	unsigned	ndp_len;
+	unsigned	ndp_len, ndp_index;
 	unsigned	block_len;
 	struct sk_buff	*skb2;
 	int		ret = -EINVAL;
@@ -1277,31 +1277,10 @@ static int ncm_unwrap_ntb(struct gether *port,
 	index2 = get_ncm(&tmp, opts->dgram_item_len);
 	dg_len2 = get_ncm(&tmp, opts->dgram_item_len);
 	dgram_counter = 0;
-	ndp_index = get_ncm(&tmp, opts->ndp_index);
+	ndp_index = get_ncm(&tmp, opts->fp_index);
 	ndp_after_header = false;
 	do {
-<<<<<<< HEAD
-		index = index2;
-		dg_len = dg_len2;
-		if (dg_len < 14 + crc_len) { /* ethernet header + crc */
-			INFO(port->func.config->cdev, "Bad dgram length: %x\n",
-			     dg_len);
-			goto err;
-		}
-		if (ncm->is_crc) {
-			uint32_t crc, crc2;
-
-			crc = get_unaligned_le32(skb->data +
-						 index + dg_len - crc_len);
-			crc2 = ~crc32_le(~0,
-					 skb->data + index,
-					 dg_len - crc_len);
-			if (crc != crc2) {
-				INFO(port->func.config->cdev, "Bad CRC\n");
-				goto err;
-			}
-=======
-		/*
+				/*
 		 * NCM 3.2
 		 * dwNdpIndex
 		 */
@@ -1344,7 +1323,7 @@ static int ncm_unwrap_ntb(struct gether *port,
 		}
 		tmp += opts->reserved1;
 		/* Check for another NDP (d)wNextNdpIndex */
-		ndp_index = get_ncm(&tmp, opts->next_ndp_index);
+		ndp_index = get_ncm(&tmp, opts->next_fp_index);
 		tmp += opts->reserved2;
 
 		ndp_len -= opts->ndp_size;
