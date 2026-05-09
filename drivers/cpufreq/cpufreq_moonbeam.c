@@ -42,7 +42,7 @@ static unsigned int default_powersave_bias;
  * Because of this, whitelist specific known (series) of CPUs by default, and
  * leave all others up to the user.
  */
-static int should_io_be_busy(void)
+static int __maybe_unused should_io_be_busy(void)
 {
 #if defined(CONFIG_X86)
 	/*
@@ -377,7 +377,7 @@ static int od_init(struct dbs_data *dbs_data)
 	dbs_data->sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR;
 	dbs_data->ignore_nice_load = 0;
 	tuners->powersave_bias = default_powersave_bias;
-	dbs_data->io_is_busy = should_io_be_busy();
+	dbs_data->io_is_busy = 1;
 
 	dbs_data->tuners = tuners;
 	return 0;
