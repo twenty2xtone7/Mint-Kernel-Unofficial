@@ -1426,11 +1426,8 @@ static int ncm_unwrap_ntb(struct gether *port,
 		ndp_len -= 2 * (opts->dgram_item_len * 2);
 
 		dgram_counter++;
-			dgram_counter++;
 		} while (ndp_len > 2 * (opts->dgram_item_len * 2));
 	} while (ndp_index);
-		if (index2 == 0 || dg_len2 == 0)
-			break;
 	} while (ndp_len > 2 * (opts->dgram_item_len * 2)); /* zero entry */
 
 	VDBG(port->func.config->cdev,
