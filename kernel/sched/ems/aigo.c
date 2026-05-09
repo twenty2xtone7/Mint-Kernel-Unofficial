@@ -119,7 +119,7 @@ struct aigov_cpu {
 
 static DEFINE_PER_CPU(struct aigov_cpu, aigov_cpu);
 
-#define DEFAULT_EXPIRED_TIME	70
+#define DEFAULT_EXPIRED_TIME	100
 static void aigov_stop_slack(int cpu);
 static void aigov_start_slack(int cpu);
 static void aigov_update_min(struct cpufreq_policy *policy);
@@ -408,8 +408,8 @@ void aigov_get_target_util(unsigned long *util, unsigned long *max, int cpu)
    	/* boost util with schedtune */
    	pelt_util += schedtune_cpu_margin(pelt_util, cpu);
 
-   	/* get tipping point of util */
-	pelt_util = pelt_util + (pelt_util >> 2);
+   	/* get tipping point of util - more conservative for power savings */
+	pelt_util = pelt_util + (pelt_util >> 1);
 	pelt_util = min(pelt_util, max_cap);
 	pelt_max = max_cap;
 
