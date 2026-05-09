@@ -2413,7 +2413,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	policy->min = new_policy->min;
 	policy->max = new_policy->max;
 
-	if (policy->user_policy_locked) {
+	if (policy->user_policy_locked && policy->user_policy.max > 0) {
 		policy->min = policy->user_policy.max;
 		policy->max = policy->user_policy.max;
 	}
