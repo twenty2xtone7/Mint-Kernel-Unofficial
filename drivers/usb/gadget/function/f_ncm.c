@@ -1338,7 +1338,7 @@ static int ncm_unwrap_ntb(struct gether *port,
 			index = index2;
 			/* wDatagramIndex[0] */
 			if ((index < opts->nth_size) ||
-					(index > block_len - opts->dpe_size)) {
+					(index > block_len - opts->ndp_size)) {
 				INFO(port->func.config->cdev,
 				     "Bad index: %#X\n", index);
 				goto err;
@@ -1385,13 +1385,13 @@ static int ncm_unwrap_ntb(struct gether *port,
 					goto err;
 				}
 			} else {
-				if (index2 < opts->nth_size + opts->dpe_size) {
+				if (index2 < opts->nth_size + opts->ndp_size) {
 					INFO(port->func.config->cdev,
 					     "Bad index: %#X\n", index2);
 					goto err;
 				}
 			}
-			if (index2 > block_len - opts->dpe_size) {
+			if (index2 > block_len - opts->ndp_size) {
 				INFO(port->func.config->cdev,
 				     "Bad index: %#X\n", index2);
 				goto err;
@@ -1409,7 +1409,7 @@ static int ncm_unwrap_ntb(struct gether *port,
 			 * Copy the data into a new skb.
 			 * This ensures the truesize is correct
 			 */
-			skb2 = netdev_alloc_skb_ip_align(ncm->netdev,
+			skb2 = netdev_alloc_skb_ip_align(ncm->net,
 							 dg_len - crc_len);
 			if (skb2 == NULL)
 				goto err;
