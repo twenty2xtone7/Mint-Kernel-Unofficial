@@ -736,15 +736,37 @@ static ssize_t store_##file_name					\
 	ret = cpufreq_set_policy(policy, &new_policy);		\
 	if (!ret) {							\
 		policy->user_policy.object = temp;			\
-		if (object == max)					\
-			policy->user_policy_locked = true;		\
 	}								\
 									\
 	return ret ? ret : count;					\
 }
 
 store_one(scaling_min_freq, min);
-store_one(scaling_max_freq, max);
+
+static ssize_t store_scaling_max_freq(struct cpufreq_policy *policy,
+				      const char *buf, size_t count)
+{
+	int ret;
+	unsigned int freq;
+	struct cpufreq_policy new_policy;
+
+	memcpy(&new_policy, policy, sizeof(*policy));
+	new_policy.min = policy->user_policy.min;
+	new_policy.max = policy->user_policy.max;
+
+	ret = sscanf(buf, "%u", &new_policy.max);
+	if (ret != 1)
+		return -EINVAL;
+
+	freq = new_policy.max;
+	ret = cpufreq_set_policy(policy, &new_policy);
+	if (!ret) {
+		policy->user_policy.max = freq;
+		policy->user_policy_locked = true;
+	}
+
+	return ret ? ret : count;
+}
 
 /**
  * show_cpuinfo_cur_freq - current CPU frequency as detected by hardware

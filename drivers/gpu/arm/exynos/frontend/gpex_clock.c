@@ -385,6 +385,12 @@ int gpex_clock_set(int clk)
 		return -1;
 	}
 
+	if ((clk_info.min_lock > 0) && (target_clk < clk_info.min_lock))
+		target_clk = clk_info.min_lock;
+
+	if ((clk_info.max_lock > 0) && (target_clk > clk_info.max_lock))
+		target_clk = clk_info.max_lock;
+
 	gpex_pm_lock();
 
 	if (gpex_pm_get_status(false))
