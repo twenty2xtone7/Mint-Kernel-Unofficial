@@ -166,7 +166,6 @@ struct gadget_config_name {
 	struct list_head list;
 };
 
-<<<<<<< HEAD
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 int dwc3_gadget_get_cmply_link_state_wrapper(void)
 {

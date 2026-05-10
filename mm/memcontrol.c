@@ -5355,17 +5355,8 @@ static int memory_events_show(struct seq_file *m, void *v)
 		   atomic_long_read(&memcg->memory_events[MEMCG_MAX]));
 	seq_printf(m, "oom %lu\n",
 		   atomic_long_read(&memcg->memory_events[MEMCG_OOM]));
-<<<<<<< HEAD
-<<<<<<< HEAD
-	seq_printf(m, "oom_kill %lu\n",
+seq_printf(m, "oom_kill %lu\n",
 		   atomic_long_read(&memcg->memory_events[MEMCG_OOM_KILL]));
-=======
-	seq_printf(m, "oom_kill %lu\n", memcg_sum_events(memcg, OOM_KILL));
->>>>>>> 09031a8b68be (mm: memcg: make sure memory.events is uptodate when waking pollers)
-=======
-	seq_printf(m, "oom_kill %lu\n",
-		   atomic_long_read(&memcg->memory_events[MEMCG_OOM_KILL]));
->>>>>>> 6f599379fd3a (mm: fix oom_kill event handling)
 
 	return 0;
 }
