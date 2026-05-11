@@ -43,6 +43,7 @@
 #ifdef CONFIG_FSCRYPT_SDP
 #include <linux/fscrypto_sdp_name.h>
 #endif
+#include <linux/build_bug.h>
 
 #include "internal.h"
 #include "mount.h"
