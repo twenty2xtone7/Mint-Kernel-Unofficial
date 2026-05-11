@@ -907,6 +907,9 @@ static __init int init_table(struct exynos_cpufreq_domain *domain)
 	cal_dfs_get_rate_table(domain->cal_id, table);
 	cal_dfs_get_asv_table(domain->cal_id, volt_table);
 
+	pr_info("[CPUFREQ] Domain%d: CAL max=%lu, set max=%lu, table_size=%d",
+		domain->id, table[0], domain->max_freq, domain->table_size);
+
 	for (index = 0; index < domain->table_size; index++) {
 		domain->freq_table[index].driver_data = index;
 		if (table[index] > domain->max_freq)
@@ -1271,11 +1274,15 @@ static __init int init_domain(struct exynos_cpufreq_domain *domain,
 		domain->max_freq = arg_cpu_max_c1;
 		domain->min_usable_freq = arg_cpu_min_c1;
 		domain->min_freq = arg_cpu_min_c1;
+		pr_info("[CPUFREQ] Domain%d (LITTLE): max_freq=%lu min_freq=%lu\n",
+			domain->id, domain->max_freq, domain->min_freq);
 	} else if (domain->id == 1) {
 		domain->max_usable_freq = arg_cpu_max_c2;
 		domain->max_freq = arg_cpu_max_c2;
 		domain->min_usable_freq = arg_cpu_min_c2;
 		domain->min_freq = arg_cpu_min_c2;
+		pr_info("[CPUFREQ] Domain%d (BIG): max_freq=%lu min_freq=%lu\n",
+			domain->id, domain->max_freq, domain->min_freq);
 	}
 #endif
 //FINAL OVERCLOCK
