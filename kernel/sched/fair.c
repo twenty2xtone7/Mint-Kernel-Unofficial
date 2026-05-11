@@ -8158,11 +8158,14 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	int boosted = (schedtune_task_boost(p) > 0) || (task_boost > 0);
 	int start_cpu;
 
+	pr_info("[SCHED] find_energy_efficient_cpu: pid=%d prev_cpu=%d", p->pid, prev_cpu);
+
 	if (is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
 			cpumask_test_cpu(prev_cpu, p->cpus_ptr))
 		return prev_cpu;
 
 	start_cpu = get_start_cpu(p);
+	pr_info("[SCHED] find_energy_efficient_cpu: start_cpu=%d", start_cpu);
 	if (start_cpu < 0)
 		goto eas_not_ready;
 
