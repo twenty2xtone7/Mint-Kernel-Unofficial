@@ -1237,6 +1237,7 @@ config SCHED_USE_FLUID_RT
 config OPLUS_PREFER_SILVER
 	default y
 	bool "a task placement decision for non-ui task"
+	depends on SCHED_WALT
 	help
 	  task placement decision feature for non-ui task
 
