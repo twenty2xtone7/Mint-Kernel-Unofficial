@@ -8167,12 +8167,9 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		goto eas_not_ready;
 
 	if (sysctl_prefer_silver && prefer_silver_check_task_util(p)) {
-		pr_info("[SCHED] prefer_silver: pid=%d calling find_best_silver_cpu", p->pid);
 		int best = find_best_silver_cpu(p);
-		if (best >= 0) {
-			pr_info("[SCHED] prefer_silver: pid=%d returning cpu=%d", p->pid, best);
+		if (best >= 0)
 			return best;
-		}
 	}
 
 	is_rtg = task_in_related_thread_group(p);
