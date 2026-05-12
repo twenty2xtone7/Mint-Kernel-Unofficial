@@ -1234,13 +1234,6 @@ config SCHED_USE_FLUID_RT
 	And in some circumstances, she allows the task of lower priority
 	to preempt the higher one based on weighted load.
 
-config OPLUS_PREFER_SILVER
-	default y
-	bool "a task placement decision for non-ui task"
-	depends on SCHED_WALT
-	help
-	  task placement decision feature for non-ui task
-
 config SYSFS_DEPRECATED
 	bool "Enable deprecated sysfs features to support old userspace tools"
 	depends on SYSFS

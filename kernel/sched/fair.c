@@ -43,47 +43,6 @@
 #include <cpu/ftt/ftt.h>
 #endif
 
-
-#include "walt.h"
-
-#include <linux/prefer_silver.h>
-
-#ifdef CONFIG_SMP
-static inline bool task_fits_max(struct task_struct *p, int cpu);
-#endif /* CONFIG_SMP */
-
-#ifdef CONFIG_SCHED_WALT
-static void walt_fixup_sched_stats_fair(struct rq *rq, struct task_struct *p,
-					u16 updated_demand_scaled,
-					u16 updated_pred_demand_scaled);
-static void walt_fixup_nr_big_tasks(struct rq *rq, struct task_struct *p,
-					int delta, bool inc);
-#endif /* CONFIG_SCHED_WALT */
-
-#if defined(CONFIG_SCHED_WALT) && defined(CONFIG_CFS_BANDWIDTH)
-
-static void walt_init_cfs_rq_stats(struct cfs_rq *cfs_rq);
-static void walt_inc_cfs_rq_stats(struct cfs_rq *cfs_rq,
-				  struct task_struct *p);
-static void walt_dec_cfs_rq_stats(struct cfs_rq *cfs_rq,
-				  struct task_struct *p);
-static void walt_inc_throttled_cfs_rq_stats(struct walt_sched_stats *stats,
-					    struct cfs_rq *cfs_rq);
-static void walt_dec_throttled_cfs_rq_stats(struct walt_sched_stats *stats,
-					    struct cfs_rq *cfs_rq);
-#else
-static inline void walt_init_cfs_rq_stats(struct cfs_rq *cfs_rq) {}
-static inline void
-walt_inc_cfs_rq_stats(struct cfs_rq *cfs_rq, struct task_struct *p) {}
-static inline void
-walt_dec_cfs_rq_stats(struct cfs_rq *cfs_rq, struct task_struct *p) {}
-
-#define walt_inc_throttled_cfs_rq_stats(...)
-#define walt_dec_throttled_cfs_rq_stats(...)
-
-
-#endif
-
 #include <soc/samsung/exynos-emc.h>
 
 #include "sched.h"
@@ -111,10 +70,6 @@ unsigned int normalized_sysctl_sched_latency		= 5000000ULL;
  */
 unsigned int sysctl_sched_sync_hint_enable = 1;
 /*
- * Enable/disable force load balancing in scheduler.
- */
-unsigned int sysctl_sched_force_lb_enable = 0;
-/*
  * Enable/disable using cstate knowledge in idle sibling selection
  */
 unsigned int sysctl_sched_cstate_aware = 1;
@@ -137,7 +92,7 @@ enum sched_tunable_scaling sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_N
  *
  * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_min_granularity		= 500000ULL;
+unsigned int sysctl_sched_min_granularity		= 625000ULL;
 unsigned int normalized_sysctl_sched_min_granularity	= 625000ULL;
 
 /*
@@ -161,10 +116,10 @@ unsigned int sysctl_sched_child_runs_first __read_mostly = 1;
  * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
  * (current: 5 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_wakeup_granularity		= 1500000UL;
+unsigned int sysctl_sched_wakeup_granularity		= 2500000UL;
 unsigned int normalized_sysctl_sched_wakeup_granularity	= 2500000UL;
 
-unsigned int __read_mostly sysctl_sched_migration_cost	= 500000UL;
+unsigned int __read_mostly sysctl_sched_migration_cost	= 2000000UL;
 
 #ifdef CONFIG_SCHED_WALT
 unsigned int sysctl_sched_use_walt_cpu_util = 1;
@@ -8062,7 +8017,7 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 			      int sd_flag, int wake_flags)
 {
 	struct sched_domain *sd = NULL;
-	int sync __maybe_unused = wake_flags & WF_SYNC;
+	int sync = wake_flags & WF_SYNC;
 
 	sd = rcu_dereference_sched(cpu_rq(prev_cpu)->sd);
 
@@ -8089,152 +8044,7 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 	if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
 		return false;
 
-	return true;
-}
-
-static DEFINE_PER_CPU(cpumask_t, energy_cpus) __maybe_unused;
-
-/*
- * find_energy_efficient_cpu(): Find most energy-efficient target CPU for the
- * waking task. find_energy_efficient_cpu() looks for the CPU with maximum
- * spare capacity in each performance domain and uses it as a potential
- * candidate to execute the task. Then, it uses the Energy Model to figure
- * out which of the CPU candidates is the most energy-efficient.
- *
- * The rationale for this heuristic is as follows. In a performance domain,
- * all the most energy efficient CPU candidates (according to the Energy
- * Model) are those for which we'll request a low frequency. When there are
- * several CPUs for which the frequency request will be the same, we don't
- * have enough data to break the tie between them, because the Energy Model
- * only includes active power costs. With this model, if we assume that
- * frequency requests follow utilization (e.g. using schedutil), the CPU with
- * the maximum spare capacity in a performance domain is guaranteed to be among
- * the best candidates of the performance domain.
- *
- * In practice, it could be preferable from an energy standpoint to pack
- * small tasks on a CPU in order to let other CPUs go in deeper idle states,
- * but that could also hurt our chances to go cluster idle, and we have no
- * ways to tell with the current Energy Model if this is actually a good
- * idea or not. So, find_energy_efficient_cpu() basically favors
- * cluster-packing, and spreading inside a cluster. That should at least be
- * a good thing for latency, and this is consistent with the idea that most
- * of the energy savings of EAS come from the asymmetry of the system, and
- * not so much from breaking the tie between identical CPUs. That's also the
- * reason why EAS is enabled in the topology code only for systems where
- * SD_ASYM_CPUCAPACITY is set.
- *
- * NOTE: Forkees are not accepted in the energy-aware wake-up path because
- * they don't have any useful utilization data yet and it's not possible to
- * forecast their impact on energy consumption. Consequently, they will be
- * placed by find_idlest_cpu() on the least loaded CPU, which might turn out
- * to be energy-inefficient in some use-cases. The alternative would be to
- * bias new tasks towards specific types of CPUs first, or to try to infer
- * their util_avg from the parent task, but those heuristics could hurt
- * other use-cases too. So, until someone finds a better way to solve this,
- * let's keep things simple by re-using the existing slow path.
- */
-
-/*
- * NOTE: This function is unused - find_energy_efficient_cpu below at line 7941
- * is the actual EAS function that gets called. This version is broken (references
- * undefined struct perf_domain and rd->pd which don't exist in this kernel).
- */
-#if 0
-static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
-				     int sync, int sibling_count_hint)
-{
-	unsigned long prev_energy = ULONG_MAX, best_energy = ULONG_MAX;
-	struct root_domain *rd = cpu_rq(smp_processor_id())->rd;
-	int weight, cpu = smp_processor_id(), best_energy_cpu = prev_cpu;
-	unsigned long cur_energy;
-	struct perf_domain *pd;
-	struct sched_domain *sd;
-	cpumask_t *candidates;
-	bool is_rtg, curr_is_rtg;
-	struct find_best_target_env fbt_env;
-	bool need_idle = wake_to_idle(p);
-	int placement_boost = task_boost_policy(p);
-	u64 start_t = 0;
-	int delta = 0;
-	int task_boost = per_task_boost(p);
-	int boosted = (schedtune_task_boost(p) > 0) || (task_boost > 0);
-	int start_cpu;
-
-	if (is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
-			cpumask_test_cpu(prev_cpu, p->cpus_ptr))
-		return prev_cpu;
-
-	start_cpu = get_start_cpu(p);
-	if (start_cpu < 0)
-		goto eas_not_ready;
-
-	if (sysctl_prefer_silver && prefer_silver_check_task_util(p)) {
-		int best = find_best_silver_cpu(p);
-		if (best >= 0)
-			return best;
-	}
-
-	is_rtg = task_in_related_thread_group(p);
-	curr_is_rtg = task_in_related_thread_group(cpu_rq(cpu)->curr);
-
-	fbt_env.fastpath = 0;
-	fbt_env.need_idle = need_idle;
-
-	if (trace_sched_task_util_enabled())
-		start_t = sched_clock();
-
-	/* Pre-select a set of candidate CPUs. */
-	candidates = this_cpu_ptr(&energy_cpus);
-	cpumask_clear(candidates);
-
-	if (sync && (need_idle || (is_rtg && curr_is_rtg)))
-		sync = 0;
-
-	if (sysctl_sched_sync_hint_enable && sync &&
-				bias_to_this_cpu(p, cpu, start_cpu)) {
-		best_energy_cpu = cpu;
-		fbt_env.fastpath = SYNC_WAKEUP;
-		goto done;
-	}
-
-	rcu_read_lock();
-	pd = rcu_dereference(rd->pd);
-	if (!pd)
-		goto fail;
-
-	/*
-	 * Energy-aware wake-up happens on the lowest sched_domain starting
-	 * from sd_asym_cpucapacity spanning over this_cpu and prev_cpu.
-	 */
-	sd = rcu_dereference(*this_cpu_ptr(&sd_asym_cpucapacity));
-	while (sd && !cpumask_test_cpu(prev_cpu, sched_domain_span(sd)))
-		sd = sd->parent;
-	if (!sd)
-		goto fail;
-
-	sync_entity_load_avg(&p->se);
-	if (!task_util_est(p))
-		goto unlock;
-
-	if (sched_feat(FIND_BEST_TARGET)) {
-		fbt_env.is_rtg = is_rtg;
-		fbt_env.placement_boost = placement_boost;
-		fbt_env.start_cpu = start_cpu;
-		fbt_env.boosted = boosted;
-		fbt_env.strict_max = is_rtg &&
-			(task_boost == TASK_BOOST_STRICT_MAX);
-		fbt_env.skip_cpu = is_many_wakeup(sibling_count_hint) ?
-				   cpu : -1;
-
-		find_best_target(NULL, candidates, p, &fbt_env);
-	} else {
-		select_cpu_candidates(sd, candidates, pd, p, prev_cpu);
-	}
-
-	/* Bail out if no candidate was found. */
-	weight = cpumask_weight(candidates);
-	if (!weight) {
-
+	if(!sched_feat(EAS_PREFER_IDLE)){
 		/*
 		 * Force prefer-idle tasks into the slow path, this may not happen
 		 * if none of the sd flags matched.
@@ -8249,7 +8059,6 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	}
 	return true;
 }
-#endif
 
 /*
  * select_task_rq_fair: Select target runqueue for the waking task in domains
