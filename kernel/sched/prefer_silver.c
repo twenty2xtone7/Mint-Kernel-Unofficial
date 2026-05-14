@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Copyright (C) 2020 Oplus. All rights reserved.
+ */
+#include <linux/sched.h>
+#include <linux/sysctl.h>
+#include <linux/reciprocal_div.h>
+#include <linux/topology.h>
+#include <linux/cpufreq.h>
+#include "sched.h"
+#include <linux/prefer_silver.h>
+
+int sysctl_prefer_silver = 1;
+int sysctl_heavy_task_thresh = 50;
+int sysctl_cpu_util_thresh = 85;
+int sysctl_silver_trigger_freq = 1503000;
+
+/*
+ * Pre-built bitmap of silver cores (cluster_id == 0).
+ * Built once at late init, used to skip non-silver CPUs
+ * without touching cpu_topology[] on every placement.
+ */
+static DECLARE_BITMAP(silver_core_mask, NR_CPUS);
+
+static int __init silver_core_mask_init(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		if (cpu_topology[cpu].cluster_id == 0)
+			__set_bit(cpu, silver_core_mask);
+	}
+	return 0;
+}
+late_initcall(silver_core_mask_init);
+
+bool prefer_silver_check_freq(int cpu)
+{
+	unsigned int freq = cpufreq_quick_get(cpu);
+	return freq < sysctl_silver_trigger_freq;
+}
+
+static inline unsigned long __scale_demand(u64 demand)
+{
+	unsigned int divisor = sched_ravg_window >> SCHED_CAPACITY_SHIFT;
+
+	if (likely(divisor > 0))
+		return (unsigned long)div64_u64(demand, divisor);
+
+	return 0;
+}
+
+static inline unsigned long ps_task_util(struct task_struct *p)
+{
+#ifdef CONFIG_SCHED_WALT
+	if (likely(sched_ravg_window > 0)) {
+		u64 demand = p->ravg.demand;
+		return (unsigned long)div64_u64(demand << SCHED_CAPACITY_SHIFT, sched_ravg_window);
+	}
+#endif
+	return task_util(p);
+}
+
+unsigned long ps_cpu_util(int cpu)
+{
+#ifdef CONFIG_SCHED_WALT
+	if (likely(sched_ravg_window > 0)) {
+		u64 walt_cpu_util = cpu_rq(cpu)->cumulative_runnable_avg;
+
+		walt_cpu_util <<= SCHED_CAPACITY_SHIFT;
+		do_div(walt_cpu_util, sched_ravg_window);
+
+		return min_t(unsigned long, (unsigned long)walt_cpu_util,
+			     capacity_orig_of(cpu));
+	}
+#endif
+	return cpu_util(cpu);
+}
+
+bool prefer_silver_check_task_util(struct task_struct *p)
+{
+	unsigned long thresh;
+
+	thresh = capacity_orig_of(task_cpu(p)) *
+		 sysctl_heavy_task_thresh / 100;
+
+	return task_util(p) < thresh;
+}
+
+bool prefer_silver_check_cpu_util(int cpu)
+{
+	return (capacity_orig_of(cpu) * sysctl_cpu_util_thresh) >
+		(ps_cpu_util(cpu) * 100);
+}
+
+int find_best_silver_cpu(struct task_struct *p)
+{
+	struct cpumask _silver_allowed;
+	int cpu, best_cpu = -1;
+	unsigned long min_util = ULONG_MAX;
+
+	cpumask_and(&_silver_allowed, to_cpumask(silver_core_mask),
+		    p->cpus_ptr);
+
+	for_each_cpu(cpu, &_silver_allowed) {
+		unsigned long cur_util;
+
+		if (!prefer_silver_check_freq(cpu))
+			continue;
+
+		cur_util = ps_cpu_util(cpu);
+
+		if ((capacity_orig_of(cpu) * sysctl_cpu_util_thresh) <=
+		    (cur_util * 100))
+			continue;
+
+		if (cur_util < min_util) {
+			min_util = cur_util;
+			best_cpu = cpu;
+
+			if (cur_util == 0)
+				break;
+		}
+	}
+	return best_cpu;
+}

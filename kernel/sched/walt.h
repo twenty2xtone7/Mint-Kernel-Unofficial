@@ -14,6 +14,8 @@
 #ifndef __WALT_H
 #define __WALT_H
 
+#define MAX_MARGIN_LEVELS 5
+
 struct rq_flags;
 
 #ifdef CONFIG_SCHED_WALT
@@ -65,5 +67,49 @@ static inline void walt_dec_cfs_cumulative_runnable_avg(struct cfs_rq *rq,
 #endif
 
 extern bool walt_disabled;
+
+extern unsigned int sysctl_sched_user_hint;
+extern unsigned int sysctl_sched_window_stats_policy;
+extern unsigned int sysctl_sched_group_upmigrate_pct;
+extern unsigned int sysctl_sched_group_downmigrate_pct;
+extern int sysctl_sched_boost;
+extern unsigned int sysctl_sched_conservative_pl;
+extern unsigned int sysctl_sched_many_wakeup_threshold;
+extern unsigned int sysctl_sched_walt_rotate_big_tasks;
+extern unsigned int sysctl_sched_min_task_util_for_boost;
+extern unsigned int sysctl_sched_min_task_util_for_colocation;
+extern unsigned int sysctl_sched_asym_cap_sibling_freq_match_pct;
+extern unsigned int sysctl_sched_coloc_downmigrate_ns;
+extern unsigned int sysctl_sched_task_unfilter_period;
+extern unsigned int sysctl_sched_busy_hyst_enable_cpus;
+extern unsigned int sysctl_sched_busy_hyst;
+extern unsigned int sysctl_sched_coloc_busy_hyst_enable_cpus;
+extern unsigned int sysctl_sched_coloc_busy_hyst;
+extern unsigned int sysctl_sched_coloc_busy_hyst_max_ms;
+extern unsigned int sysctl_sched_ravg_window_nr_ticks;
+extern unsigned int sysctl_sched_dynamic_ravg_window_enable;
+extern unsigned int sysctl_sched_prefer_spread;
+extern unsigned int sysctl_walt_rtg_cfs_boost_prio;
+extern unsigned int sysctl_walt_low_latency_task_threshold;
+extern unsigned int sysctl_sched_capacity_margin_up[MAX_MARGIN_LEVELS];
+extern unsigned int sysctl_sched_capacity_margin_down[MAX_MARGIN_LEVELS];
+extern unsigned int sysctl_sched_force_lb_enable;
+extern unsigned int sysctl_memcg_stat_show_subtree;
+extern int sched_user_hint_max;
+extern int min_cfs_boost_prio;
+extern int max_cfs_boost_prio;
+
+int walt_proc_user_hint_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+int sched_boost_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+int proc_douintvec_minmax_schedhyst(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+int sched_ravg_window_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
+int sched_updown_migrate_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos);
 
 #endif

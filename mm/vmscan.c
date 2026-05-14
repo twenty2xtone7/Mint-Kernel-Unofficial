@@ -2289,8 +2289,6 @@ int vm_workingset_protection_update_handler(struct ctl_table *table, int write,
 
 static void prepare_workingset_protection(pg_data_t *pgdat, struct scan_control *sc)
 {
-	unsigned long node_mem_total;
-	struct sysinfo i;
 
 	/*
 	 * Set working set protection thresholds to 0
@@ -2313,19 +2311,24 @@ static void prepare_workingset_protection(pg_data_t *pgdat, struct scan_control 
 		   sysctl_clean_low_ratio ||
 		   sysctl_clean_min_ratio)) {
 
-		/* Get total memory of the current NUMA node */
-#ifdef CONFIG_NUMA
-		si_meminfo_node(&i, pgdat->node_id);
-#else
-		si_meminfo(&i);
-#endif
-		node_mem_total = i.totalram;
-
 		/*
-		 * Recalculate ratio thresholds only if memory size changes
-		 * and convert percentage ratio into kbytes.
+		 * Use cached totalram value to avoid calling si_meminfo()
+		 * on every reclaim cycle. Only recalculate when the
+		 * sysctl handler triggers a refresh by resetting the
+		 * prev_totalram to 0.
 		 */
-		if (unlikely(workingset_protection_prev_totalram != node_mem_total)) {
+		if (unlikely(!workingset_protection_prev_totalram)) {
+			unsigned long node_mem_total;
+			struct sysinfo i;
+
+			/* Get total memory of the current NUMA node */
+#ifdef CONFIG_NUMA
+			si_meminfo_node(&i, pgdat->node_id);
+#else
+			si_meminfo(&i);
+#endif
+			node_mem_total = i.totalram;
+
 			sysctl_anon_low_ratio_kb =
 				node_mem_total * sysctl_anon_low_ratio / 100;
 			sysctl_anon_min_ratio_kb =
@@ -2708,10 +2711,25 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 #ifdef CONFIG_WORKINGSET_PROTECTION
 
 	/*
-	 * Force-scan anon if clean file pages is under vm.clean_low_kbytes
-	 * or vm.clean_min_kbytes.
+	 * Force-scan file if anonymous pages are below the low watermark.
+	 * This provides best-effort protection for anonymous pages.
+	 * If both anon and clean are under their low thresholds, don't
+	 * force one direction — let normal balancing handle it to avoid OOM.
 	 */
-	if (sc->clean_below_low || sc->clean_below_min) {
+	if ((sc->anon_below_low || sc->anon_below_min) &&
+	    !sc->clean_below_low && !sc->clean_below_min) {
+		scan_balance = SCAN_FILE;
+		goto out;
+	}
+
+	/*
+	 * Force-scan anon if clean file pages are under vm.clean_low_kbytes
+	 * or vm.clean_min_kbytes.
+	 * If both anon and clean are under their low thresholds, don't
+	 * force one direction — let normal balancing handle it to avoid OOM.
+	 */
+	if ((sc->clean_below_low || sc->clean_below_min) &&
+	    !sc->anon_below_low && !sc->anon_below_min) {
 		scan_balance = SCAN_ANON;
 		goto out;
 	}
@@ -2831,12 +2849,33 @@ out:
 
 #ifdef CONFIG_WORKINGSET_PROTECTION
 		/*
-		 * Hard protection of the working set.
-		 * Don't reclaim anon/file pages when the amount is
-		 * below the watermark of the same type.
+		 * Graduated protection of the working set.
+		 * Three levels based on watermark crossings:
+		 *
+		 * Above low watermark: normal scanning (no reduction)
+		 * Between low and min: 50% scan reduction
+		 * Below min watermark: full protection (no scanning)
+		 *
+		 * When both anon and file are below their min watermarks,
+		 * allow minimal scanning of both to prevent OOM deadlocks.
 		 */
-		if (file ? sc->clean_below_min : sc->anon_below_min)
-			scan = 0;
+	if (file) {
+			if (sc->clean_below_min) {
+				scan = 0;
+				if (unlikely(sc->anon_below_min))
+					scan = SWAP_CLUSTER_MAX;
+			} else if (sc->clean_below_low) {
+				scan >>= 1;
+			}
+		} else {
+			if (sc->anon_below_min) {
+				scan = 0;
+				if (unlikely(sc->clean_below_min))
+					scan = SWAP_CLUSTER_MAX;
+			} else if (sc->anon_below_low) {
+				scan >>= 1;
+			}
+		}
 #endif
 
 

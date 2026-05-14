@@ -20,6 +20,7 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/sysctl.h>
 #include <linux/syscore_ops.h>
 #include <trace/events/sched.h>
 #include "sched.h"
@@ -899,6 +900,99 @@ void walt_fixup_busy_time(struct task_struct *p, int new_cpu)
 
 	if (p->state == TASK_WAKING)
 		double_rq_unlock(src_rq, dest_rq);
+}
+
+/*
+ * WALT sysctl variables
+ */
+unsigned int sysctl_sched_user_hint;
+unsigned int sysctl_sched_window_stats_policy = 2;
+unsigned int sysctl_sched_group_upmigrate_pct = 95;
+unsigned int sysctl_sched_group_downmigrate_pct = 60;
+int sysctl_sched_boost;
+unsigned int sysctl_sched_conservative_pl;
+unsigned int sysctl_sched_many_wakeup_threshold = 4;
+unsigned int sysctl_sched_walt_rotate_big_tasks;
+unsigned int sysctl_sched_min_task_util_for_boost;
+
+unsigned int sysctl_sched_min_task_util_for_colocation;
+unsigned int sysctl_sched_asym_cap_sibling_freq_match_pct = 80;
+unsigned int sysctl_sched_coloc_downmigrate_ns;
+unsigned int sysctl_sched_task_unfilter_period = 50000000;
+unsigned int sysctl_sched_busy_hyst_enable_cpus;
+unsigned int sysctl_sched_busy_hyst;
+unsigned int sysctl_sched_coloc_busy_hyst_enable_cpus;
+unsigned int sysctl_sched_coloc_busy_hyst;
+unsigned int sysctl_sched_coloc_busy_hyst_max_ms = 10;
+unsigned int sysctl_sched_ravg_window_nr_ticks = 5;
+unsigned int sysctl_sched_dynamic_ravg_window_enable;
+unsigned int sysctl_sched_prefer_spread;
+unsigned int sysctl_walt_rtg_cfs_boost_prio = 100;
+unsigned int sysctl_walt_low_latency_task_threshold;
+unsigned int sched_ravg_window = (20000000 / TICK_NSEC) * TICK_NSEC;
+unsigned int sysctl_sched_force_lb_enable = 1;
+unsigned int sysctl_memcg_stat_show_subtree;
+
+unsigned int sysctl_sched_capacity_margin_up[MAX_MARGIN_LEVELS] = {35, 25, 20, 15, 10};
+unsigned int sysctl_sched_capacity_margin_down[MAX_MARGIN_LEVELS] = {45, 30, 25, 20, 15};
+
+int sched_user_hint_max = 100;
+int min_cfs_boost_prio = 0;
+int max_cfs_boost_prio = 100;
+
+int walt_proc_user_hint_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	unsigned int *data = table->data;
+	int ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (ret || !write)
+		return ret;
+
+	if (*data > 100)
+		*data = 100;
+
+	return 0;
+}
+
+int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (ret || !write)
+		return ret;
+
+	if (sysctl_sched_group_upmigrate_pct < sysctl_sched_group_downmigrate_pct)
+		sysctl_sched_group_upmigrate_pct = sysctl_sched_group_downmigrate_pct;
+
+	return 0;
+}
+
+int sched_boost_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+}
+
+int proc_douintvec_minmax_schedhyst(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return proc_douintvec_minmax(table, write, buffer, lenp, ppos);
+}
+
+int sched_ravg_window_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+}
+
+int sched_updown_migrate_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 }
 
 void walt_init_new_task_load(struct task_struct *p)
