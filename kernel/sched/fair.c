@@ -94,7 +94,7 @@ static inline bool task_fits_max(struct task_struct *p, int cpu);
 static void walt_fixup_sched_stats_fair(struct rq *rq, struct task_struct *p,
 					u16 updated_demand_scaled,
 					u16 updated_pred_demand_scaled);
-static void walt_fixup_nr_big_tasks(struct rq *rq, struct task_struct *p,
+static void __maybe_unused walt_fixup_nr_big_tasks(struct rq *rq, struct task_struct *p,
 					int delta, bool inc);
 #endif /* CONFIG_SCHED_WALT */
 
@@ -8144,7 +8144,7 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 	return true;
 }
 
-static DEFINE_PER_CPU(cpumask_t, energy_cpus);
+static DEFINE_PER_CPU(cpumask_t, energy_cpus) __maybe_unused;
 
 /*
  * find_energy_efficient_cpu(): Find most energy-efficient target CPU for the
