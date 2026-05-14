@@ -8138,8 +8138,11 @@ static inline int wake_energy(struct task_struct *p, int prev_cpu,
 	if (unlikely(!sched_feat(FIND_BEST_TARGET) && !task_util_est(p)))
 		return false;
 
+	if (!sched_feat(EAS_PREFER_IDLE))
+		return false;
 
-	if(!sched_feat(EAS_PREFER_IDLE)){
+	return true;
+}
 
 static DEFINE_PER_CPU(cpumask_t, energy_cpus);
 

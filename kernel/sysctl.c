@@ -154,7 +154,6 @@ static int __maybe_unused two_hundred_million = 200000000;
 static int two_hundred_fifty_five = 255;
 static int __maybe_unused one_hundred_thousand = 100000;
 static unsigned long __maybe_unused ns_per_sec = NSEC_PER_SEC;
-
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
 static unsigned long dirty_bytes_min = 2 * PAGE_SIZE;
 
@@ -377,7 +376,7 @@ static struct ctl_table kern_table[] = {
 	},
 	{
 		.procname       = "sched_cpu_high_irqload",
-		.data           = &sysctl_sched_cpu_high_irqload,
+		.data           = &sysctl_sched_walt_cpu_high_irqload,
 		.maxlen         = sizeof(unsigned int),
 		.mode           = 0644,
 		.proc_handler   = proc_dointvec,
