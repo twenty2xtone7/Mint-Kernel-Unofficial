@@ -139,6 +139,14 @@ config CPU_FREQ_DEFAULT_GOV_ENERGY_ADAPTIVE
 	  have a look at the help section of that governor. The fallback
 	  governor will be 'performance'.
 
+config CPU_FREQ_DEFAULT_GOV_ECLIPSE
+	bool "eclipse"
+	select CPU_FREQ_GOV_ECLIPSE
+	help
+	  Use the 'eclipse' CPUFreq governor by default. This combines
+	  performance, schedutil, energy_adaptive, and moonbeam into
+	  a single unified governor.
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -209,6 +217,21 @@ config CPU_FREQ_GOV_MOONBEAM
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called cpufreq_ondemand.
+
+	  If in doubt, say N.
+
+config CPU_FREQ_GOV_ECLIPSE
+	tristate "'eclipse' cpufreq policy governor"
+	select CPU_FREQ_GOV_COMMON
+	select CPU_FREQ_GOV_PERFORMANCE
+	help
+	  'eclipse' - Unified governor fusing performance, schedutil,
+	  energy_adaptive, and moonbeam. Uses both DBS idle-time sampling
+	  and scheduler utilization to determine frequency, with adaptive
+	  headroom bands and a performance mode toggle.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cpufreq_eclipse.
 
 	  If in doubt, say N.
 
