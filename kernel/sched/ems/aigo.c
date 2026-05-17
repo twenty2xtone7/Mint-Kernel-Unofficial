@@ -1441,7 +1441,8 @@ exit:
 
 /* Boot Shield: freeze background processes during boot for faster startup */
 static int boot_shield __read_mostly = 1;
-static unsigned int boot_shield_groups __read_mostly = ~0;
+static unsigned int boot_shield_groups __read_mostly = 0xF;
+static unsigned int boot_shield_timeout __read_mostly = 30;
 
 static struct ctl_table aigov_sysctl_table[] = {
 	{
@@ -1458,6 +1459,13 @@ static struct ctl_table aigov_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_douintvec,
 	},
+	{
+		.procname	= "boot_shield_timeout",
+		.data		= &boot_shield_timeout,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_douintvec,
+	},
 	{ }
 };
 
@@ -1465,10 +1473,35 @@ static void boot_shield_scan(struct work_struct *work);
 static DECLARE_DELAYED_WORK(boot_shield_work, boot_shield_scan);
 static int boot_shield_done;
 
+static void boot_shield_thaw(void)
+{
+	struct task_struct *p;
+
+	rcu_read_lock();
+	for_each_process(p) {
+		if (p->flags & PF_KTHREAD)
+			continue;
+		if (p->state == TASK_KILLABLE || p->state == TASK_INTERRUPTIBLE)
+			continue;
+		if (p->state & TASK_STOPPED)
+			send_sig(SIGCONT, p, 0);
+	}
+	rcu_read_unlock();
+}
+
+static void boot_shield_timeout_fn(struct work_struct *work)
+{
+	boot_shield_done = 1;
+	cancel_delayed_work_sync(&boot_shield_work);
+	boot_shield_thaw();
+	pr_info("boot_shield: thawed after %u seconds\n", boot_shield_timeout);
+}
+static DECLARE_DELAYED_WORK(boot_shield_timeout_work, boot_shield_timeout_fn);
+
 static void boot_shield_scan(struct work_struct *work)
 {
 	struct task_struct *p;
-	int uid;
+	int uid, grp;
 
 	if (boot_shield_done)
 		return;
@@ -1480,7 +1513,12 @@ static void boot_shield_scan(struct work_struct *work)
 		uid = from_kuid_munged(current_user_ns(), task_uid(p));
 		if (uid < 10000)
 			continue;
-		if (!(boot_shield_groups & (1U << schedtune_task_group_idx(p))))
+		grp = schedtune_task_group_idx(p);
+		if (grp < 0 || grp >= 32)
+			continue;
+		if (!(boot_shield_groups & (1U << grp)))
+			continue;
+		if (p->state & TASK_STOPPED)
 			continue;
 		send_sig(SIGSTOP, p, 0);
 	}
@@ -1489,30 +1527,23 @@ static void boot_shield_scan(struct work_struct *work)
 	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(2000));
 }
 
-static void boot_shield_thaw(void)
-{
-	struct task_struct *p;
-
-	rcu_read_lock();
-	for_each_process(p) {
-		if (p->flags & PF_KTHREAD)
-			continue;
-		send_sig(SIGCONT, p, 0);
-	}
-	rcu_read_unlock();
-}
-
 static int boot_shield_initcall(void)
 {
+	struct ctl_table_header *hdr;
+
 	if (!boot_shield)
 		return 0;
 
-	register_sysctl_table(aigov_sysctl_table);
-	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(5000));
-	msleep(30000);
-	boot_shield_done = 1;
-	cancel_delayed_work_sync(&boot_shield_work);
-	boot_shield_thaw();
+	hdr = register_sysctl_table(aigov_sysctl_table);
+	if (!hdr)
+		return -ENOMEM;
+
+	boot_shield_done = 0;
+
+	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(3000));
+	schedule_delayed_work(&boot_shield_timeout_work,
+			      msecs_to_jiffies(boot_shield_timeout * 1000));
+
 	return 0;
 }
 late_initcall(boot_shield_initcall);
