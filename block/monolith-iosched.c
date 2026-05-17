@@ -76,7 +76,7 @@ struct md_data {
 	int batch_counter;		/* counts ratio repeats */
 
 	/* Thinktime */
-	u64 last_dispatch;
+	unsigned long last_dispatch;
 	int last_dir;			/* MD_SR/MD_SW/etc or -1 */
 	unsigned int seen_idle;
 
@@ -525,8 +525,8 @@ static struct elv_fs_entry md_attrs[] = {
 	MD_ATTR(sync_ratio),
 	MD_ATTR(batch_count),
 	MD_ATTR(fifo_batch),
-	MD_ATTR(latency_ema),
-	MD_ATTR(scale_down),
+	__ATTR(latency_ema, S_IRUGO, md_latency_ema_show, NULL),
+	__ATTR(scale_down, S_IRUGO, md_scale_down_show, NULL),
 	__ATTR_NULL
 };
 

@@ -40,7 +40,7 @@ struct aether_data {
 	int front_merges;
 
 	/* CFQ thinktime */
-	u64 last_dispatch;		/* jiffies */
+	unsigned long last_dispatch;	/* jiffies */
 	unsigned int think_seen;	/* thinktime detected flag */
 
 	/* Kyber latency tracking (EMA) */
@@ -376,8 +376,8 @@ static struct elv_fs_entry aether_attrs[] = {
 	AETHER_ATTR(writes_starved),
 	AETHER_ATTR(front_merges),
 	AETHER_ATTR(fifo_batch),
-	AETHER_ATTR(latency_ema),
-	AETHER_ATTR(tight_mode),
+	__ATTR(latency_ema, S_IRUGO, aether_latency_ema_show, NULL),
+	__ATTR(tight_mode, S_IRUGO, aether_tight_mode_show, NULL),
 	__ATTR_NULL
 };
 
