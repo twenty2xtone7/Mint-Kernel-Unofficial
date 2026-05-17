@@ -24,13 +24,13 @@
 enum { ASYNC, SYNC };
 
 /* Tunables */
-static const int sync_read_expire = 350;	/* max time before a read sync is submitted. */
-static const int sync_write_expire = 550;	/* max time before a write sync is submitted. */
-static const int async_read_expire = 250;	/* ditto for read async, these limits are SOFT! */
-static const int async_write_expire = 450;	/* ditto for write async, these limits are SOFT! */
-static const int fifo_batch = 16;		/* # of sequential requests treated as one by the above parameters. */
-static const int writes_starved = 4;		/* max times reads can starve a write */
-static const int sleep_latency_multiple = 10;	/* multple for expire time when device is asleep */
+static const int sync_read_expire = 15;		/* ~50ms, down from 1.2s */
+static const int sync_write_expire = 30;	/* ~100ms, down from 1.8s */
+static const int async_read_expire = 30;	/* ~100ms, down from 0.8s */
+static const int async_write_expire = 60;	/* ~200ms, down from 1.5s */
+static const int fifo_batch = 8;		/* smaller batch = quicker expiry checks */
+static const int writes_starved = 8;		/* reads can starve writes longer */
+static const int sleep_latency_multiple = 5;	/* smaller multiplier when asleep */
 
 /* Elevator data */
 struct maple_data {

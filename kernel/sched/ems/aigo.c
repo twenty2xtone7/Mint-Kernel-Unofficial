@@ -13,11 +13,14 @@
 
 #include <linux/cpu_pm.h>
 #include <linux/cpufreq.h>
+#include <linux/delay.h>
 #include <linux/ems.h>
 #include <linux/fb.h>
 #include <linux/ffsi.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
+#include <linux/sysctl.h>
+#include <linux/uidgid.h>
 
 #include <uapi/linux/sched/types.h>
 
@@ -36,9 +39,9 @@
  */
 #define UTILAVG_FFSI_VARIANCE	16
 static struct elasticity elasticity_cpufreq = {
-	.gamma_numer 	= 32,
+	.gamma_numer 	= 35,
 	.gamma_denom 	= 25,
-	.theta_numer 	= 23,
+	.theta_numer 	= 24,
 	.theta_denom 	= 25,
 };
 
@@ -115,11 +118,15 @@ struct aigov_cpu {
 #ifdef CONFIG_NO_HZ_COMMON
 	unsigned long             saved_idle_calls;
 #endif
+	/* Perf tracking */
+	unsigned long		  prev_util;
+	unsigned int		  ramp_boost;
+	unsigned long		  peak_util;
 };
 
 static DEFINE_PER_CPU(struct aigov_cpu, aigov_cpu);
 
-#define DEFAULT_EXPIRED_TIME	100
+#define DEFAULT_EXPIRED_TIME	50
 static void aigov_stop_slack(int cpu);
 static void aigov_start_slack(int cpu);
 static void aigov_update_min(struct cpufreq_policy *policy);
@@ -408,8 +415,12 @@ void aigov_get_target_util(unsigned long *util, unsigned long *max, int cpu)
    	/* boost util with schedtune */
    	pelt_util += schedtune_cpu_margin(pelt_util, cpu);
 
-   	/* get tipping point of util - more conservative for power savings */
-	pelt_util = pelt_util + (pelt_util >> 1);
+   	if (pelt_util * 4 < max_cap)
+		pelt_util += pelt_util;
+	else if (pelt_util * 2 < max_cap)
+		pelt_util += pelt_util - (pelt_util >> 2);
+	else
+		pelt_util += pelt_util >> 1;
 	pelt_util = min(pelt_util, max_cap);
 	pelt_max = max_cap;
 
@@ -429,11 +440,8 @@ void aigov_get_target_util(unsigned long *util, unsigned long *max, int cpu)
 	if (util_ratio > mlt_art_boost_limit(mlt))
 		goto skip_active_ratio;
 
-	if (mlt_art_high_patten(mlt)) {
-		*util = 0;
-		*max = SCHED_CAPACITY_SCALE;
-		goto out;
-	}
+	if (mlt_art_high_patten(mlt))
+		goto skip_active_ratio;
 
 	active_ratio = max(mlt->active_ratio_recent, mlt->period[mlt->cur_period]);
 
@@ -523,19 +531,13 @@ static unsigned int aigov_next_freq(struct aigov_cpu *ai_cpu, u64 time)
 	struct cpufreq_policy *policy = ag_policy->policy;
 	unsigned long util = 0, max = 1;
 	unsigned int j;
+	unsigned long max_cap = arch_scale_cpu_capacity(NULL, cpumask_first(policy->related_cpus));
 
 	for_each_cpu_and(j, policy->related_cpus, cpu_online_mask) {
 		struct aigov_cpu *j_ai_cpu = &per_cpu(aigov_cpu, j);
 		unsigned long j_util, j_max;
 		s64 delta_ns;
 
-		/*
-		 * If the CPU utilization was last updated before the previous
-		 * frequency update and the time elapsed between the last update
-		 * of the CPU utilization and the last frequency update is long
-		 * enough, don't take the CPU into account as it probably is
-		 * idle now (and clear iowait_boost for it).
-		 */
 		delta_ns = time - j_ai_cpu->last_update;
 		if (delta_ns > TICK_NSEC) {
 			j_ai_cpu->iowait_boost = 0;
@@ -543,18 +545,43 @@ static unsigned int aigov_next_freq(struct aigov_cpu *ai_cpu, u64 time)
 			continue;
 		}
 		if (j_ai_cpu->flags & SCHED_CPUFREQ_DL) {
-			/* clear cache when it's bypassed */
 			ag_policy->cached_raw_freq = 0;
 			return policy->cpuinfo.max_freq;
 		}
 
 		j_util = j_ai_cpu->util;
 		j_max = j_ai_cpu->max;
+
+		/* wake-from-idle: floor at 50% if CPU just became active */
+		if (!j_ai_cpu->prev_util && j_util)
+			j_util = max(j_util, max_cap >> 1);
+
+		/* peak floor: keep util at least 25% of recent peak */
+		if (j_util > j_ai_cpu->peak_util)
+			j_ai_cpu->peak_util = j_util;
+		j_ai_cpu->peak_util -= j_ai_cpu->peak_util >> 10;
+		j_util = max(j_util, j_ai_cpu->peak_util >> 2);
+
+		/* ramp boost on util increase */
+		if (j_util > j_ai_cpu->prev_util) {
+			unsigned long bump = j_util - j_ai_cpu->prev_util;
+			j_ai_cpu->ramp_boost = min(bump, max_cap >> 2);
+		}
+		j_ai_cpu->ramp_boost -= j_ai_cpu->ramp_boost >> 3;
+		j_util += j_ai_cpu->ramp_boost;
+
+		/* nr_running: +6.25% per extra task beyond 2 */
+		if (cpu_rq(j)->nr_running > 2)
+			j_util += j_util >> 4;
+
+		j_util = min(j_util, max_cap);
+
 		if (j_util * max > j_max * util) {
 			util = j_util;
 			max = j_max;
 		}
 
+		j_ai_cpu->prev_util = j_ai_cpu->util;
 		aigov_iowait_boost(j_ai_cpu, &util, &max);
 	}
 
@@ -1044,8 +1071,7 @@ int aigov_start(struct cpufreq_policy *policy)
 
 	ag_policy->up_rate_delay_ns =
 		ag_policy->tunables->up_rate_limit_us * NSEC_PER_USEC;
-	ag_policy->down_rate_delay_ns =
-		ag_policy->tunables->down_rate_limit_us * NSEC_PER_USEC;
+	ag_policy->down_rate_delay_ns = 0;
 	update_min_rate_limit_ns(ag_policy);
 	ag_policy->last_freq_update_time = 0;
 	ag_policy->next_freq = 0;
@@ -1412,6 +1438,84 @@ static void __init aigov_cpufreq_init(void)
 exit:
 	pr_info("%s: failed to initialized slack_timer, pm_qos handler\n", __func__);
 }
+
+/* Boot Shield: freeze background processes during boot for faster startup */
+static int boot_shield __read_mostly = 1;
+static unsigned int boot_shield_groups __read_mostly = ~0;
+
+static struct ctl_table aigov_sysctl_table[] = {
+	{
+		.procname	= "boot_shield",
+		.data		= &boot_shield,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.procname	= "boot_shield_groups",
+		.data		= &boot_shield_groups,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_douintvec,
+	},
+	{ }
+};
+
+static void boot_shield_scan(struct work_struct *work);
+static DECLARE_DELAYED_WORK(boot_shield_work, boot_shield_scan);
+static int boot_shield_done;
+
+static void boot_shield_scan(struct work_struct *work)
+{
+	struct task_struct *p;
+	int uid;
+
+	if (boot_shield_done)
+		return;
+
+	rcu_read_lock();
+	for_each_process(p) {
+		if (p->flags & PF_KTHREAD)
+			continue;
+		uid = from_kuid_munged(current_user_ns(), task_uid(p));
+		if (uid < 10000)
+			continue;
+		if (!(boot_shield_groups & (1U << schedtune_task_group_idx(p))))
+			continue;
+		send_sig(SIGSTOP, p, 0);
+	}
+	rcu_read_unlock();
+
+	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(2000));
+}
+
+static void boot_shield_thaw(void)
+{
+	struct task_struct *p;
+
+	rcu_read_lock();
+	for_each_process(p) {
+		if (p->flags & PF_KTHREAD)
+			continue;
+		send_sig(SIGCONT, p, 0);
+	}
+	rcu_read_unlock();
+}
+
+static int boot_shield_initcall(void)
+{
+	if (!boot_shield)
+		return 0;
+
+	register_sysctl_table(aigov_sysctl_table);
+	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(5000));
+	msleep(30000);
+	boot_shield_done = 1;
+	cancel_delayed_work_sync(&boot_shield_work);
+	boot_shield_thaw();
+	return 0;
+}
+late_initcall(boot_shield_initcall);
 
 static int __init aigov_register(void)
 {

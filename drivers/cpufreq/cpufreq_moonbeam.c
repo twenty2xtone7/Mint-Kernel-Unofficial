@@ -153,13 +153,42 @@ static void od_update(struct cpufreq_policy *policy)
 	} else {
 		/* Calculate the next frequency proportional to load */
 		unsigned int freq_next, min_f, max_f;
+		unsigned int target_load = load;
 
-		min_f = policy->cpuinfo.min_freq;
-		max_f = policy->cpuinfo.max_freq;
-		freq_next = min_f + load * (max_f - min_f) / 100;
+		/* wake-from-idle: floor at 50% if CPU just became active */
+		if (!dbs_info->prev_load && load)
+			target_load = max(target_load, 50U);
+
+		/* peak floor: keep at least 25% of recent peak */
+		if (target_load > dbs_info->peak_load)
+			dbs_info->peak_load = target_load;
+		dbs_info->peak_load -= dbs_info->peak_load >> 10;
+		target_load = max(target_load, dbs_info->peak_load >> 2);
+
+		/* ramp boost: transient boost on load increase */
+		if (target_load > dbs_info->prev_load) {
+			unsigned int bump = target_load - dbs_info->prev_load;
+			dbs_info->ramp_boost = min(bump, 25U);
+		}
+		dbs_info->ramp_boost -= dbs_info->ramp_boost >> 3;
+		target_load += dbs_info->ramp_boost;
+
+		/* Adaptive headroom: more boost at low loads */
+		if (target_load < 25)
+			target_load += target_load;
+		else if (target_load < 50)
+			target_load += target_load - (target_load >> 2);
+		else
+			target_load += target_load >> 1;
+
+		target_load = min(target_load, 100U);
 
 		/* No longer fully busy, reset rate_mult */
 		policy_dbs->rate_mult = 1;
+
+		min_f = policy->cpuinfo.min_freq;
+		max_f = policy->cpuinfo.max_freq;
+		freq_next = min_f + target_load * (max_f - min_f) / 100;
 
 		if (od_tuners->powersave_bias)
 			freq_next = od_ops.powersave_bias_target(policy,
@@ -167,6 +196,8 @@ static void od_update(struct cpufreq_policy *policy)
 								 CPUFREQ_RELATION_L);
 
 		__cpufreq_driver_target(policy, freq_next, CPUFREQ_RELATION_C);
+
+		dbs_info->prev_load = load;
 	}
 }
 
@@ -367,14 +398,9 @@ static int od_init(struct dbs_data *dbs_data)
 	cpu = get_cpu();
 	idle_time = get_cpu_idle_time_us(cpu, NULL);
 	put_cpu();
-	if (idle_time != -1ULL) {
-		/* Idle micro accounting is supported. Use finer thresholds */
-		dbs_data->up_threshold = MICRO_FREQUENCY_UP_THRESHOLD;
-	} else {
-		dbs_data->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
-	}
+	dbs_data->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
 
-	dbs_data->sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR;
+	dbs_data->sampling_down_factor = 1;
 	dbs_data->ignore_nice_load = 0;
 	tuners->powersave_bias = default_powersave_bias;
 	dbs_data->io_is_busy = 1;
@@ -393,6 +419,9 @@ static void od_start(struct cpufreq_policy *policy)
 	struct od_policy_dbs_info *dbs_info = to_dbs_info(policy->governor_data);
 
 	dbs_info->sample_type = OD_NORMAL_SAMPLE;
+	dbs_info->prev_load = 0;
+	dbs_info->ramp_boost = 0;
+	dbs_info->peak_load = 0;
 	ondemand_powersave_bias_init(policy);
 }
 

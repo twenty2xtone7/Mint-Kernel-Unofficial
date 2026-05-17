@@ -17,6 +17,9 @@ struct od_policy_dbs_info {
 	unsigned int freq_lo_delay_us;
 	unsigned int freq_hi_delay_us;
 	unsigned int sample_type:1;
+	unsigned int prev_load;
+	unsigned int ramp_boost;
+	unsigned int peak_load;
 };
 
 static inline struct od_policy_dbs_info *to_dbs_info(struct policy_dbs_info *policy_dbs)

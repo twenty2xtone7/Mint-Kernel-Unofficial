@@ -26,6 +26,14 @@ config IOSCHED_MAPLE
 	tristate "Maple I/O scheduler"
 	default n
 
+config IOSCHED_HYBRID
+	tristate "Hybrid I/O scheduler"
+	default n
+	---help---
+	  Hybrid combines Deadline's expire-based dispatch with CFQ thinktime
+	  detection and Kyber-style latency tracking. Designed for UFS/eMMC
+	  with aggressive read bias and adaptive behavior.
+
 config IOSCHED_CFQ
 	tristate "CFQ I/O scheduler"
 	default y
@@ -107,6 +115,9 @@ choice
 	config DEFAULT_MAPLE
 		bool "MAPLE" if IOSCHED_MAPLE=y
 
+	config DEFAULT_HYBRID
+		bool "HYBRID" if IOSCHED_HYBRID=y
+
 
 	config DEFAULT_NOOP
 		bool "No-op"
@@ -123,6 +134,7 @@ config DEFAULT_IOSCHED
 	default "anxiety" if DEFAULT_ANXIETY
 
 	default "maple" if DEFAULT_MAPLE
+	default "hybrid" if DEFAULT_HYBRID
 
 	default "noop" if DEFAULT_NOOP
 

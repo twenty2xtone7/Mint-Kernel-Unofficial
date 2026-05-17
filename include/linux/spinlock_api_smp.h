@@ -5,6 +5,10 @@
 # error "please don't include this file directly"
 #endif
 
+#ifndef CONFIG_DEBUG_SNAPSHOT_SPINLOCK
+#define dbg_snapshot_spinlock(a, b)		do { } while(0)
+#endif
+
 /*
  * include/linux/spinlock_api_smp.h
  *

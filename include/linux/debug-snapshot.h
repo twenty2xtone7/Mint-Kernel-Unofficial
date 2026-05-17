@@ -273,7 +273,11 @@ static inline void dbg_snapshot_save_log(int cpu, unsigned long where)
 
 extern void dbg_snapshot_soc_helper_init(void);
 static inline void dbg_snapshot_bug_func(void) {BUG();}
+#ifdef CONFIG_ARM64
 static inline void dbg_snapshot_spin_func(void) {do {wfi();} while(1);}
+#else
+static inline void dbg_snapshot_spin_func(void) {do {cpu_relax();} while(1);}
+#endif
 
 extern struct atomic_notifier_head restart_handler_list;
 extern struct blocking_notifier_head reboot_notifier_list;
