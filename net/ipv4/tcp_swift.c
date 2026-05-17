@@ -13,8 +13,13 @@
  *
  *   Mode transitions are smoothed with hysteresis to avoid oscillation.
  *
+ *   ML bandit layer: uses ε-greedy multi-armed bandit to select between
+ *   4 tuning profiles per adapt_level. Arms are evaluated by a reward
+ *   function = delivered^2 / (elapsed * rtt), favoring both throughput
+ *   and low latency. Exploration rate starts at 0.2 and decays to 0.05.
+ *
  * Core: BBR state machine + Westwood ACK-rate bandwidth + Cubic growth,
- *       with link-quality-adaptive parameters throughout.
+ *       with ML-optimized parameters throughout.
  *
  * Copyright (C) 2022 swift
  */
@@ -34,6 +39,13 @@ enum swift_state {
 	SWIFT_DRAIN,
 	SWIFT_PROBE_BW,
 	SWIFT_PROBE_RTT,
+};
+
+/* Per-arm tuning profile */
+struct swift_arm {
+	u16 probe_boost;	/* probe gain scalar, 1000 = 1.0x, e.g. 1150 = 1.15x */
+	u8  smooth_shift;	/* EWMA decay: bw = (bw * ((1<<s)-1) + sample) >> s */
+	u8  ww_shift;		/* Westwood window: max(rtt, min) << (level + shift) */
 };
 
 struct swift {
@@ -72,35 +84,30 @@ struct swift {
 	u32	lq_delivered;
 	u32	lq_lost;
 	u16	adapt_level;	/* 0=stable .. 3=unstable */
+
+	/* ML bandit */
+	u16	ml_reward_acc;
+	u16	ml_rtt_rounds;	/* RTTs accumulated in this evaluation */
+	u16	ml_interval;	/* RTTs between arm switches */
+	u8	ml_arm;		/* current arm (0..3) */
+	u8	ml_epsilon;	/* exploration probability * 100, decays by 1 per eval */
+	u8	ml_best_arm;	/* arm with highest reward so far */
+	u16	ml_arm_reward[4]; /* smoothed reward per arm */
+	u16	ml_arm_count[4];  /* selection count per arm */
 };
 
-/* Per-mode pacing gain tables */
-static const u32 swift_pacing_gain_stable[] = {
-	SWIFT_UNIT * 125 / 100,
-	SWIFT_UNIT * 75 / 100,
-	SWIFT_UNIT, SWIFT_UNIT, SWIFT_UNIT,
-	SWIFT_UNIT, SWIFT_UNIT, SWIFT_UNIT,
+/* Default arm profiles: [probe_boost, smooth_shift, ww_shift] */
+static const struct swift_arm swift_arms[4] = {
+	{ 1250, 2, 1 },	/* arm 0: Sprint - aggressive */
+	{ 1150, 3, 2 },	/* arm 1: Cruise - balanced */
+	{ 1100, 3, 3 },	/* arm 2: Endure - stable */
+	{ 1050, 4, 4 },	/* arm 3: Survive - ultra conservative */
 };
 
-static const u32 swift_pacing_gain_normal[] = {
-	SWIFT_UNIT * 115 / 100,
+/* Base pacing gain tables (will be scaled by arm probe_boost) */
+static const u32 swift_pacing_gain_base[] = {
+	SWIFT_UNIT,			/* placeholder for scaled probe */
 	SWIFT_UNIT * 85 / 100,
-	SWIFT_UNIT, SWIFT_UNIT,
-	SWIFT_UNIT, SWIFT_UNIT,
-	SWIFT_UNIT, SWIFT_UNIT,
-};
-
-static const u32 swift_pacing_gain_unstable[] = {
-	SWIFT_UNIT * 110 / 100,
-	SWIFT_UNIT * 90 / 100,
-	SWIFT_UNIT, SWIFT_UNIT,
-	SWIFT_UNIT, SWIFT_UNIT,
-	SWIFT_UNIT, SWIFT_UNIT,
-};
-
-static const u32 swift_pacing_gain_bad[] = {
-	SWIFT_UNIT * 105 / 100,
-	SWIFT_UNIT * 95 / 100,
 	SWIFT_UNIT, SWIFT_UNIT,
 	SWIFT_UNIT, SWIFT_UNIT,
 	SWIFT_UNIT, SWIFT_UNIT,
@@ -118,15 +125,8 @@ static const u32 swift_min_rtt_win_sec	= 10;
 static const u32 swift_probe_rtt_ms	= 200;
 
 /* Loss rate thresholds per adapt level */
-static const u32 swift_lq_up_thresh[]	= { 2, 5, 10, 20 };  /* permille up */
-static const u32 swift_lq_down_thresh[]	= { 1, 3, 5, 10 };  /* permille down */
-
-static const u32 *swift_pacing_gain[] = {
-	swift_pacing_gain_stable,
-	swift_pacing_gain_normal,
-	swift_pacing_gain_unstable,
-	swift_pacing_gain_bad,
-};
+static const u32 swift_lq_up_thresh[]	= { 2, 5, 10, 20 };
+static const u32 swift_lq_down_thresh[]	= { 1, 3, 5, 10 };
 
 static u32 ww_filter(u32 prev, u32 sample)
 {
@@ -151,21 +151,69 @@ static u32 swift_cubic_root(u64 x)
 	return l;
 }
 
-/* Evaluate link quality and update adapt_level */
-static void swift_eval_link_quality(struct sock *sk)
+/* ML: select arm using ε-greedy */
+static void swift_ml_select_arm(struct swift *f)
 {
-	struct swift *f = inet_csk_ca(sk);
-	u32 losses;
-	u32 rate;
+	u8 best_arm = 0;
+	u16 best_val = 0;
+	int i;
 
-	losses = f->lq_lost;
-	f->lq_lost = 0;
-	f->lq_delivered = 0;
+	for (i = 0; i < 4; i++) {
+		if (f->ml_arm_reward[i] > best_val) {
+			best_val = f->ml_arm_reward[i];
+			best_arm = i;
+		}
+	}
+	f->ml_best_arm = best_arm;
+
+	/* ε-greedy: explore with probability epsilon/100 */
+	if (prandom_u32_max(100) < f->ml_epsilon) {
+		f->ml_arm = prandom_u32_max(4);
+	} else {
+		f->ml_arm = best_arm;
+	}
+
+	/* Decay exploration rate */
+	if (f->ml_epsilon > 5)
+		f->ml_epsilon--;
+}
+
+/* ML: update reward for the current arm using exponential smoothing */
+static void swift_ml_update_reward(struct swift *f, u32 delivered, u32 elapsed_us, u32 rtt_us)
+{
+	u32 reward;
+	u16 *acc, *cnt;
+
+	if (!elapsed_us || !rtt_us)
+		return;
+
+	/* Reward = delivered^2 / (elapsed_us * rtt_us / 1000), scaled to fit u16 */
+	reward = (u32)div64_u64((u64)delivered * delivered * 1000,
+				(u64)elapsed_us * rtt_us);
+	reward = min(reward, 65535U);
+
+	acc = &f->ml_arm_reward[f->ml_arm];
+	cnt = &f->ml_arm_count[f->ml_arm];
+
+	/* Exponential moving average with alpha = 1/4 */
+	if (*cnt)
+		*acc = ((u32)*acc * 3 + reward) >> 2;
+	else
+		*acc = reward;
+	(*cnt)++;
+}
+
+/* Evaluate link quality and update adapt_level */
+static void swift_eval_link_quality(struct swift *f)
+{
+	u32 rate;
 
 	if (!f->lq_delivered)
 		return;
 
-	rate = losses * 1000 / f->lq_delivered; /* permille */
+	rate = f->lq_lost * 1000 / f->lq_delivered;
+	f->lq_lost = 0;
+	f->lq_delivered = 0;
 
 	if (rate > swift_lq_up_thresh[f->adapt_level]) {
 		if (f->adapt_level < 3)
@@ -179,6 +227,7 @@ static void swift_eval_link_quality(struct sock *sk)
 static void swift_init(struct sock *sk)
 {
 	struct swift *f = inet_csk_ca(sk);
+	int i;
 
 	f->state = SWIFT_STARTUP;
 	f->probe_idx = prandom_u32_max(SWIFT_CYCLE_LEN - SWIFT_CYCLE_RAND);
@@ -209,24 +258,34 @@ static void swift_init(struct sock *sk)
 	f->lq_delivered = 0;
 	f->lq_lost = 0;
 	f->lq_loss_start = tcp_jiffies32;
+
+	f->ml_arm = 1;
+	f->ml_epsilon = 20;
+	f->ml_best_arm = 1;
+	f->ml_interval = 8;
+	f->ml_rtt_rounds = 0;
+	f->ml_reward_acc = 0;
+	for (i = 0; i < 4; i++) {
+		f->ml_arm_reward[i] = 0;
+		f->ml_arm_count[i] = 0;
+	}
 }
 
-static void swift_westwood_update(struct sock *sk, u32 bytes, u32 rtt)
+static void swift_westwood_update(struct swift *f, u32 delta_jiffies,
+				  u32 bytes, u32 rtt)
 {
-	struct swift *f = inet_csk_ca(sk);
-	u32 delta = tcp_jiffies32 - f->ww_win_start;
-	/* Window scales with adapt_level: tighter on stable, wider on unstable */
-	u32 win = max(rtt, SWIFT_RTT_MIN_US) << (1 + f->adapt_level);
+	u32 win = max_t(u32, rtt, SWIFT_RTT_MIN_US) << (1 + f->adapt_level +
+						 swift_arms[f->ml_arm].ww_shift);
 
 	f->ww_acked += bytes;
 	f->ww_rtt = rtt;
 	f->ww_rtt_min = min(f->ww_rtt_min, rtt);
 
-	if (delta > max_t(u32, usecs_to_jiffies(rtt),
-			  usecs_to_jiffies(win))) {
-		u32 bw = (f->ww_acked * USEC_PER_SEC) / jiffies_to_usecs(delta);
-		/* More smoothing on unstable links */
-		if (f->adapt_level >= 2)
+	if (delta_jiffies > max_t(u32, usecs_to_jiffies(rtt),
+				  usecs_to_jiffies(win))) {
+		u32 bw = (f->ww_acked * USEC_PER_SEC) /
+			 jiffies_to_usecs(delta_jiffies);
+		if (f->adapt_level >= 2 || swift_arms[f->ml_arm].ww_shift >= 3)
 			f->bw_westwood = ww_filter(f->bw_westwood, bw);
 		else
 			f->bw_westwood = bw;
@@ -253,8 +312,9 @@ static void swift_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 		f->ww_rtt_min = sample->rtt_us;
 	}
 
-	swift_westwood_update(sk, sample->pkts_acked *
-			      tcp_sk(sk)->mss_cache, sample->rtt_us);
+	swift_westwood_update(f, tcp_jiffies32 - f->ww_win_start,
+			      sample->pkts_acked * tcp_sk(sk)->mss_cache,
+			      sample->rtt_us);
 }
 
 static u32 swift_cubic_cnt(struct swift *f, u32 cwnd)
@@ -317,21 +377,22 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct swift *f = inet_csk_ca(sk);
-	const u32 *gain_table;
-	u32 bw, rate, cwnd;
+	const struct swift_arm *arm;
+	u32 bw, rate, cwnd, probe_unscaled;
 	int round_start = 0;
+	u32 boost;
 
 	if (rs->delivered < 0 || rs->interval_us <= 0)
 		return;
 
-	/* Track loss for link quality */
 	f->lq_delivered += rs->delivered;
 	f->lq_lost += rs->losses;
 
-	/* Evaluate link quality every 4 RTTs */
-	if (f->rtt_cnt > 0 && (f->rtt_cnt % 4) == 0) {
+	/* Evaluate link quality and ML bandit every ml_interval RTTs */
+	if (f->rtt_cnt > 0 && (f->rtt_cnt % f->ml_interval) == 0) {
 		f->rtt_cnt = 0;
-		swift_eval_link_quality(sk);
+		swift_eval_link_quality(f);
+		swift_ml_select_arm(f);
 	}
 
 	bw = (u32)div64_u64((u64)rs->delivered * tp->mss_cache * USEC_PER_SEC,
@@ -342,16 +403,31 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 		f->next_round_delivered = tp->delivered;
 		f->rtt_cnt++;
 		round_start = 1;
+
+		/* ML: update reward at round boundary */
+		if (f->min_rtt_us && f->ml_rtt_rounds) {
+			u32 elapsed = jiffies_to_usecs(tcp_jiffies32 -
+					f->lq_loss_start);
+			swift_ml_update_reward(f, f->ml_reward_acc,
+					       elapsed, f->min_rtt_us);
+		}
+		f->ml_reward_acc = 0;
+		f->ml_rtt_rounds++;
+		f->lq_loss_start = tcp_jiffies32;
 	}
 
-	/* Smooth bandwidth: less smoothing on stable links */
+	/* Accumulate delivered bytes for reward */
+	f->ml_reward_acc += rs->delivered * tp->mss_cache;
+
+	arm = &swift_arms[f->ml_arm];
+
+	/* Smooth bandwidth with per-arm EWMA */
 	if (round_start) {
 		if (bw > f->bw_est) {
 			f->bw_est = bw;
-		} else if (f->adapt_level >= 2) {
-			f->bw_est = (f->bw_est * 7 + bw) >> 3;
 		} else {
-			f->bw_est = (f->bw_est * 3 + bw) >> 2;
+			u32 mask = (1 << arm->smooth_shift) - 1;
+			f->bw_est = (f->bw_est * mask + bw) >> arm->smooth_shift;
 		}
 		f->rounds_since_bw = 0;
 	} else {
@@ -360,6 +436,9 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 
 	bw = max(f->bw_est, f->bw_westwood);
 	cwnd = tp->snd_cwnd;
+
+	/* Scale probe gain by arm's boost factor */
+	boost = arm->probe_boost;
 
 	switch (f->state) {
 	case SWIFT_STARTUP:
@@ -394,8 +473,17 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 			f->last_bw = bw;
 			f->probe_idx = (f->probe_idx + 1) & (SWIFT_CYCLE_LEN - 1);
 		}
-		gain_table = swift_pacing_gain[f->adapt_level];
-		rate = gain_table[f->probe_idx];
+		/* Scale the probe gain by arm boost */
+		probe_unscaled = swift_pacing_gain_base[0];
+		rate = probe_unscaled * boost / 1000;
+		/* Clamp to reasonable range */
+		if (rate > SWIFT_UNIT * 135 / 100)
+			rate = SWIFT_UNIT * 135 / 100;
+		if (rate < SWIFT_UNIT * 100 / 100)
+			rate = SWIFT_UNIT * 100 / 100;
+		/* Drain slot uses fixed gain */
+		if (f->probe_idx == 1)
+			rate = swift_pacing_gain_base[1];
 
 		if (tcp_in_slow_start(tp))
 			tp->snd_ssthresh = swift_bw_ssthresh(sk);
@@ -520,5 +608,5 @@ module_exit(swift_unregister);
 
 MODULE_AUTHOR("swift");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Swift TCP: link-quality-adaptive congestion control");
-MODULE_VERSION("1.0");
+MODULE_DESCRIPTION("Swift TCP: ML-enhanced link-quality-adaptive congestion control");
+MODULE_VERSION("2.0");
