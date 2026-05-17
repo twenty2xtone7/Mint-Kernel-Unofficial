@@ -34,15 +34,6 @@ config IOSCHED_AETHER
 	  detection and Kyber-style latency tracking. Designed for UFS/eMMC
 	  with aggressive read bias and adaptive behavior.
 
-config IOSCHED_OMEGA
-	tristate "Omega I/O scheduler"
-	default n
-	---help---
-	  Omega unifies concepts from NOOP, Deadline, SIO, Zen, Maple, CFQ,
-	  Kyber, Anxiety, and FIOPS. Features quad FIFO queues with per-queue
-	  expiry, read bias via writes_starved, thinktime detection, and
-	  adaptive latency tightening.
-
 config IOSCHED_MONOLITH
 	tristate "Monolith I/O scheduler"
 	default n
@@ -139,9 +130,6 @@ choice
 	config DEFAULT_AETHER
 		bool "AETHER" if IOSCHED_AETHER=y
 
-	config DEFAULT_OMEGA
-		bool "OMEGA" if IOSCHED_OMEGA=y
-
 	config DEFAULT_MONOLITH
 		bool "MONOLITH" if IOSCHED_MONOLITH=y
 
@@ -162,8 +150,6 @@ config DEFAULT_IOSCHED
 
 	default "maple" if DEFAULT_MAPLE
 	default "aether" if DEFAULT_AETHER
-
-	default "omega" if DEFAULT_OMEGA
 
 	default "monolith" if DEFAULT_MONOLITH
 
