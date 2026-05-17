@@ -67,10 +67,11 @@ struct flux {
 
 /* Pacing gain cycle: probe, drain, cruise */
 static const u32 flux_pacing_gain[] = {
-	FLUX_UNIT * 5 / 4,
-	FLUX_UNIT * 3 / 4,
-	FLUX_UNIT, FLUX_UNIT, FLUX_UNIT,
-	FLUX_UNIT, FLUX_UNIT, FLUX_UNIT,
+	FLUX_UNIT * 115 / 100,
+	FLUX_UNIT * 85 / 100,
+	FLUX_UNIT, FLUX_UNIT,
+	FLUX_UNIT, FLUX_UNIT,
+	FLUX_UNIT, FLUX_UNIT,
 };
 #define FLUX_CYCLE_LEN		ARRAY_SIZE(flux_pacing_gain)
 #define FLUX_CYCLE_RAND		7
@@ -146,13 +147,14 @@ static void flux_westwood_update(struct sock *sk, u32 bytes, u32 rtt)
 {
 	struct flux *f = inet_csk_ca(sk);
 	u32 delta = tcp_jiffies32 - f->ww_win_start;
+	u32 win = max(rtt, FLUX_RTT_MIN_US) << 2;
 
 	f->ww_acked += bytes;
 	f->ww_rtt = rtt;
 	f->ww_rtt_min = min(f->ww_rtt_min, rtt);
 
 	if (delta > max_t(u32, usecs_to_jiffies(rtt),
-			  usecs_to_jiffies(FLUX_RTT_MIN_US))) {
+			  usecs_to_jiffies(win))) {
 		u32 bw = (f->ww_acked * USEC_PER_SEC) / jiffies_to_usecs(delta);
 		f->bw_westwood = ww_filter(f->bw_westwood, bw);
 		f->ww_acked = 0;
@@ -168,8 +170,11 @@ static void flux_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 	if (sample->rtt_us <= 0)
 		return;
 
-	if (!f->min_rtt_us || sample->rtt_us < f->min_rtt_us)
+	/* Filter min_rtt: only lower it by at most 20% per sample to avoid noise */
+	if (!f->min_rtt_us)
 		f->min_rtt_us = sample->rtt_us;
+	else if (sample->rtt_us < f->min_rtt_us)
+		f->min_rtt_us -= (f->min_rtt_us - sample->rtt_us) >> 2;
 
 	if (!f->has_seen_rtt) {
 		f->has_seen_rtt = 1;
@@ -255,22 +260,26 @@ static void flux_main(struct sock *sk, const struct rate_sample *rs)
 			    rs->interval_us);
 	bw <<= (FLUX_BW_SCALE - 10);
 
-	if (bw > f->bw_est) {
-		f->bw_est = bw;
+	/* Round boundary detection */
+	if (before(rs->prior_delivered, f->next_round_delivered)) {
+		f->next_round_delivered = tp->delivered;
+		f->rtt_cnt++;
+		round_start = 1;
+	}
+
+	/* Smooth bandwidth with EWMA on round boundaries */
+	if (round_start) {
+		if (bw > f->bw_est) {
+			f->bw_est = bw;
+		} else {
+			f->bw_est = (f->bw_est * 7 + bw) >> 3;
+		}
 		f->rounds_since_bw = 0;
 	} else {
 		f->rounds_since_bw++;
 	}
 
 	bw = max(f->bw_est, f->bw_westwood);
-
-	/* Round boundary detection */
-	if (rs->prior_delivered >= f->next_round_delivered ||
-	    before(rs->prior_delivered, f->next_round_delivered)) {
-		round_start = 1;
-		f->next_round_delivered = tp->delivered;
-		f->rtt_cnt++;
-	}
 
 	cwnd = tp->snd_cwnd;
 
@@ -375,11 +384,11 @@ static void flux_set_state(struct sock *sk, u8 new_state)
 
 		tcp_sk(sk)->snd_ssthresh = flux_bw_ssthresh(sk);
 
-		/* Packet conservation: don't halve, use BW-based window */
-		tcp_sk(sk)->snd_cwnd = tcp_sk(sk)->snd_ssthresh;
+		/* Packet conservation: maintain at least ssthresh */
+		tcp_sk(sk)->snd_cwnd = max(tcp_sk(sk)->snd_ssthresh,
+					   tcp_sk(sk)->snd_cwnd >> 1);
 		break;
 	case TCP_CA_Recovery:
-		/* Stay aggressive during recovery */
 		break;
 	case TCP_CA_Open:
 		f->loss_in_round = 0;
