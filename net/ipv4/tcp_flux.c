@@ -144,7 +144,6 @@ static void flux_init(struct sock *sk)
 /* Westwood bandwidth from ACK rate */
 static void flux_westwood_update(struct sock *sk, u32 bytes, u32 rtt)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
 	struct flux *f = inet_csk_ca(sk);
 	u32 delta = tcp_jiffies32 - f->ww_win_start;
 
@@ -267,7 +266,7 @@ static void flux_main(struct sock *sk, const struct rate_sample *rs)
 
 	/* Round boundary detection */
 	if (rs->prior_delivered >= f->next_round_delivered ||
-	    before64(rs->prior_delivered, f->next_round_delivered)) {
+	    before(rs->prior_delivered, f->next_round_delivered)) {
 		round_start = 1;
 		f->next_round_delivered = tp->delivered;
 		f->rtt_cnt++;

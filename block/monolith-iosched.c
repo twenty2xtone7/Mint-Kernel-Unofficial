@@ -40,7 +40,7 @@ static const int md_starved		= 12;
 static const int md_sync_ratio		= 6;
 static const int md_batch_count		= 3;
 static const int md_fifo_batch		= 4;
-static const int md_thinktime		= 2;	/* jiffies */
+static const int md_thinktime_jiffies	= 2;	/* jiffies */
 
 struct md_data {
 	struct list_head fifo[MD_NR];
@@ -164,7 +164,7 @@ static void md_merged_requests(struct request_queue *q,
 static void md_thinktime(struct md_data *md)
 {
 	if (md->last_dispatch &&
-	    time_after(jiffies, md->last_dispatch + md_thinktime)) {
+	    time_after(jiffies, md->last_dispatch + md_thinktime_jiffies)) {
 		md->seen_idle = 1;
 		md->starved = 0;
 	}
