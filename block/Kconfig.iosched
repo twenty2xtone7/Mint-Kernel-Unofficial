@@ -34,6 +34,27 @@ config IOSCHED_AETHER
 	  detection and Kyber-style latency tracking. Designed for UFS/eMMC
 	  with aggressive read bias and adaptive behavior.
 
+config IOSCHED_OMEGA
+	tristate "Omega I/O scheduler"
+	default n
+	---help---
+	  Omega unifies concepts from NOOP, Deadline, SIO, Zen, Maple, CFQ,
+	  Kyber, Anxiety, and FIOPS. Features quad FIFO queues with per-queue
+	  expiry, read bias via writes_starved, thinktime detection, and
+	  adaptive latency tightening.
+
+config IOSCHED_MONOLITH
+	tristate "Monolith I/O scheduler"
+	default n
+	---help---
+	  Monolith is the ultimate unified scheduler fusing NOOP, Deadline,
+	  SIO, Zen, Maple, CFQ, Kyber, Anxiety, FIOPS, and BFQ concepts.
+	  Features quad FIFO with per-queue expiry, Anxiety-style sync_ratio
+	  + batch_count interleaving, writes_starved priority tiers, CFQ
+	  thinktime with last-direction memory, Kyber EMA latency tracking
+	  with dynamic expire scaling, expiry flushing, and front-merge
+	  support via rb-trees.
+
 config IOSCHED_CFQ
 	tristate "CFQ I/O scheduler"
 	default y
@@ -118,6 +139,12 @@ choice
 	config DEFAULT_AETHER
 		bool "AETHER" if IOSCHED_AETHER=y
 
+	config DEFAULT_OMEGA
+		bool "OMEGA" if IOSCHED_OMEGA=y
+
+	config DEFAULT_MONOLITH
+		bool "MONOLITH" if IOSCHED_MONOLITH=y
+
 
 	config DEFAULT_NOOP
 		bool "No-op"
@@ -135,6 +162,10 @@ config DEFAULT_IOSCHED
 
 	default "maple" if DEFAULT_MAPLE
 	default "aether" if DEFAULT_AETHER
+
+	default "omega" if DEFAULT_OMEGA
+
+	default "monolith" if DEFAULT_MONOLITH
 
 	default "noop" if DEFAULT_NOOP
 
