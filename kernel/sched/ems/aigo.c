@@ -1476,6 +1476,7 @@ static int boot_shield_done;
 static void boot_shield_thaw(void)
 {
 	struct task_struct *p;
+	int thawed = 0;
 
 	rcu_read_lock();
 	for_each_process(p) {
@@ -1483,18 +1484,23 @@ static void boot_shield_thaw(void)
 			continue;
 		if (p->state == TASK_KILLABLE || p->state == TASK_INTERRUPTIBLE)
 			continue;
-		if (p->state & TASK_STOPPED)
+		if (p->state & TASK_STOPPED) {
 			send_sig(SIGCONT, p, 0);
+			thawed++;
+		}
 	}
 	rcu_read_unlock();
+
+	pr_info("boot_shield: thawed %d processes\n", thawed);
 }
 
 static void boot_shield_timeout_fn(struct work_struct *work)
 {
+	pr_info("boot_shield: timeout reached (%u s), thawing all\n",
+		boot_shield_timeout);
 	boot_shield_done = 1;
 	cancel_delayed_work_sync(&boot_shield_work);
 	boot_shield_thaw();
-	pr_info("boot_shield: thawed after %u seconds\n", boot_shield_timeout);
 }
 static DECLARE_DELAYED_WORK(boot_shield_timeout_work, boot_shield_timeout_fn);
 
@@ -1502,6 +1508,7 @@ static void boot_shield_scan(struct work_struct *work)
 {
 	struct task_struct *p;
 	int uid, grp;
+	int stopped = 0;
 
 	if (boot_shield_done)
 		return;
@@ -1521,8 +1528,14 @@ static void boot_shield_scan(struct work_struct *work)
 		if (p->state & TASK_STOPPED)
 			continue;
 		send_sig(SIGSTOP, p, 0);
+		pr_info("boot_shield: SIGSTOP uid=%d pid=%d (%s)\n",
+			uid, task_pid_nr(p), p->comm);
+		stopped++;
 	}
 	rcu_read_unlock();
+
+	if (stopped)
+		pr_info("boot_shield: stopped %d processes this round\n", stopped);
 
 	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(2000));
 }
@@ -1533,6 +1546,9 @@ static int boot_shield_initcall(void)
 
 	if (!boot_shield)
 		return 0;
+
+	pr_info("boot_shield: enabled, timeout=%u s, groups=0x%x\n",
+		boot_shield_timeout, boot_shield_groups);
 
 	hdr = register_sysctl_table(aigov_sysctl_table);
 	if (!hdr)
