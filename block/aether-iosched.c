@@ -1,5 +1,5 @@
 /*
- * Hybrid I/O scheduler
+ * Aether I/O scheduler
  * Aggressive performance tuning inspired by Deadline, CFQ, and Kyber.
  * - Deadline: per-queue expiry with read bias
  * - CFQ: thinktime detection for foreground IO priority
@@ -27,7 +27,7 @@ static const int thinktime_threshold = 2;	/* jiffies (~7ms) */
 static const u64 latency_target_ns = 5 * NSEC_PER_MSEC; /* 5ms */
 static const int latency_sample_window = 4;	/* samples before re-evaluating */
 
-struct hybrid_data {
+struct aether_data {
 	struct rb_root sort_list[2];
 	struct list_head fifo_list[2];
 	struct request *next_rq[2];
@@ -51,13 +51,13 @@ struct hybrid_data {
 };
 
 static inline struct rb_root *
-hybrid_rb_root(struct hybrid_data *hd, struct request *rq)
+aether_rb_root(struct aether_data *hd, struct request *rq)
 {
 	return &hd->sort_list[rq_data_dir(rq)];
 }
 
 static inline struct request *
-hybrid_latter_request(struct request *rq)
+aether_latter_request(struct request *rq)
 {
 	struct rb_node *node = rb_next(&rq->rb_node);
 	if (node)
@@ -65,41 +65,41 @@ hybrid_latter_request(struct request *rq)
 	return NULL;
 }
 
-static void hybrid_add_rq_rb(struct hybrid_data *hd, struct request *rq)
+static void aether_add_rq_rb(struct aether_data *hd, struct request *rq)
 {
-	elv_rb_add(hybrid_rb_root(hd, rq), rq);
+	elv_rb_add(aether_rb_root(hd, rq), rq);
 }
 
-static inline void hybrid_del_rq_rb(struct hybrid_data *hd, struct request *rq)
+static inline void aether_del_rq_rb(struct aether_data *hd, struct request *rq)
 {
 	const int data_dir = rq_data_dir(rq);
 	if (hd->next_rq[data_dir] == rq)
-		hd->next_rq[data_dir] = hybrid_latter_request(rq);
-	elv_rb_del(hybrid_rb_root(hd, rq), rq);
+		hd->next_rq[data_dir] = aether_latter_request(rq);
+	elv_rb_del(aether_rb_root(hd, rq), rq);
 }
 
-static void hybrid_add_request(struct request_queue *q, struct request *rq)
+static void aether_add_request(struct request_queue *q, struct request *rq)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	const int data_dir = rq_data_dir(rq);
 
-	hybrid_add_rq_rb(hd, rq);
+	aether_add_rq_rb(hd, rq);
 
 	rq->fifo_time = jiffies + hd->fifo_expire[data_dir];
 	list_add_tail(&rq->queuelist, &hd->fifo_list[data_dir]);
 }
 
-static void hybrid_remove_request(struct request_queue *q, struct request *rq)
+static void aether_remove_request(struct request_queue *q, struct request *rq)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	rq_fifo_clear(rq);
-	hybrid_del_rq_rb(hd, rq);
+	aether_del_rq_rb(hd, rq);
 }
 
 static enum elv_merge
-hybrid_merge(struct request_queue *q, struct request **req, struct bio *bio)
+aether_merge(struct request_queue *q, struct request **req, struct bio *bio)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	struct request *__rq;
 
 	if (hd->front_merges) {
@@ -116,17 +116,17 @@ hybrid_merge(struct request_queue *q, struct request **req, struct bio *bio)
 	return ELEVATOR_NO_MERGE;
 }
 
-static void hybrid_merged_request(struct request_queue *q,
+static void aether_merged_request(struct request_queue *q,
 				  struct request *req, enum elv_merge type)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	if (type == ELEVATOR_FRONT_MERGE) {
-		elv_rb_del(hybrid_rb_root(hd, req), req);
-		hybrid_add_rq_rb(hd, req);
+		elv_rb_del(aether_rb_root(hd, req), req);
+		aether_add_rq_rb(hd, req);
 	}
 }
 
-static void hybrid_merged_requests(struct request_queue *q,
+static void aether_merged_requests(struct request_queue *q,
 				   struct request *req, struct request *next)
 {
 	if (!list_empty(&req->queuelist) && !list_empty(&next->queuelist)) {
@@ -136,28 +136,28 @@ static void hybrid_merged_requests(struct request_queue *q,
 			req->fifo_time = next->fifo_time;
 		}
 	}
-	hybrid_remove_request(q, next);
+	aether_remove_request(q, next);
 }
 
-static inline void hybrid_move_to_dispatch(struct hybrid_data *hd,
+static inline void aether_move_to_dispatch(struct aether_data *hd,
 					   struct request *rq)
 {
 	struct request_queue *q = rq->q;
-	hybrid_remove_request(q, rq);
+	aether_remove_request(q, rq);
 	elv_dispatch_add_tail(q, rq);
 }
 
-static void hybrid_move_request(struct hybrid_data *hd, struct request *rq)
+static void aether_move_request(struct aether_data *hd, struct request *rq)
 {
 	const int data_dir = rq_data_dir(rq);
 	hd->next_rq[READ] = NULL;
 	hd->next_rq[WRITE] = NULL;
-	hd->next_rq[data_dir] = hybrid_latter_request(rq);
+	hd->next_rq[data_dir] = aether_latter_request(rq);
 	hd->last_dispatch = jiffies;
-	hybrid_move_to_dispatch(hd, rq);
+	aether_move_to_dispatch(hd, rq);
 }
 
-static inline int hybrid_check_fifo(struct hybrid_data *hd, int ddir)
+static inline int aether_check_fifo(struct aether_data *hd, int ddir)
 {
 	struct request *rq = rq_entry_fifo(hd->fifo_list[ddir].next);
 	if (time_after_eq(jiffies, (unsigned long)rq->fifo_time))
@@ -166,10 +166,10 @@ static inline int hybrid_check_fifo(struct hybrid_data *hd, int ddir)
 }
 
 /* Kyber: track read latency with exponential moving average */
-static void hybrid_completed_request(struct request_queue *q,
+static void aether_completed_request(struct request_queue *q,
 				     struct request *rq)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	u64 now, start, lat;
 
 	if (rq_data_dir(rq) != READ || blk_rq_is_passthrough(rq))
@@ -196,9 +196,9 @@ static void hybrid_completed_request(struct request_queue *q,
 	}
 }
 
-static int hybrid_dispatch_requests(struct request_queue *q, int force)
+static int aether_dispatch_requests(struct request_queue *q, int force)
 {
-	struct hybrid_data *hd = q->elevator->elevator_data;
+	struct aether_data *hd = q->elevator->elevator_data;
 	const int reads = !list_empty(&hd->fifo_list[READ]);
 	const int writes = !list_empty(&hd->fifo_list[WRITE]);
 	struct request *rq;
@@ -252,7 +252,7 @@ dispatch_writes:
 	return 0;
 
 dispatch_find_request:
-	if (hybrid_check_fifo(hd, data_dir) || !hd->next_rq[data_dir])
+	if (aether_check_fifo(hd, data_dir) || !hd->next_rq[data_dir])
 		rq = rq_entry_fifo(hd->fifo_list[data_dir].next);
 	else
 		rq = hd->next_rq[data_dir];
@@ -261,21 +261,21 @@ dispatch_find_request:
 
 dispatch_request:
 	hd->batching++;
-	hybrid_move_request(hd, rq);
+	aether_move_request(hd, rq);
 	return 1;
 }
 
-static void hybrid_exit_queue(struct elevator_queue *e)
+static void aether_exit_queue(struct elevator_queue *e)
 {
-	struct hybrid_data *hd = e->elevator_data;
+	struct aether_data *hd = e->elevator_data;
 	BUG_ON(!list_empty(&hd->fifo_list[READ]));
 	BUG_ON(!list_empty(&hd->fifo_list[WRITE]));
 	kfree(hd);
 }
 
-static int hybrid_init_queue(struct request_queue *q, struct elevator_type *e)
+static int aether_init_queue(struct request_queue *q, struct elevator_type *e)
 {
-	struct hybrid_data *hd;
+	struct aether_data *hd;
 	struct elevator_queue *eq;
 
 	eq = elevator_alloc(q, e);
@@ -311,13 +311,13 @@ static int hybrid_init_queue(struct request_queue *q, struct elevator_type *e)
 /********** sysfs **********/
 
 static ssize_t
-hybrid_var_show(int var, char *page)
+aether_var_show(int var, char *page)
 {
 	return sprintf(page, "%d\n", var);
 }
 
 static void
-hybrid_var_store(int *var, const char *page)
+aether_var_store(int *var, const char *page)
 {
 	char *p = (char *)page;
 	*var = simple_strtol(p, &p, 10);
@@ -326,28 +326,28 @@ hybrid_var_store(int *var, const char *page)
 #define SHOW_FUNCTION(__FUNC, __VAR, __CONV)				\
 static ssize_t __FUNC(struct elevator_queue *e, char *page)		\
 {									\
-	struct hybrid_data *hd = e->elevator_data;			\
+	struct aether_data *hd = e->elevator_data;			\
 	int __data = __VAR;						\
 	if (__CONV)							\
 		__data = jiffies_to_msecs(__data);			\
-	return hybrid_var_show(__data, (page));			\
+	return aether_var_show(__data, (page));			\
 }
-SHOW_FUNCTION(hybrid_read_expire_show, hd->fifo_expire[READ], 1);
-SHOW_FUNCTION(hybrid_write_expire_show, hd->fifo_expire[WRITE], 1);
-SHOW_FUNCTION(hybrid_writes_starved_show, hd->writes_starved, 0);
-SHOW_FUNCTION(hybrid_front_merges_show, hd->front_merges, 0);
-SHOW_FUNCTION(hybrid_fifo_batch_show, hd->fifo_batch, 0);
-SHOW_FUNCTION(hybrid_latency_ema_show, hd->read_latency_ema / 1000, 0);
-SHOW_FUNCTION(hybrid_tight_mode_show, hd->tight_mode, 0);
+SHOW_FUNCTION(aether_read_expire_show, hd->fifo_expire[READ], 1);
+SHOW_FUNCTION(aether_write_expire_show, hd->fifo_expire[WRITE], 1);
+SHOW_FUNCTION(aether_writes_starved_show, hd->writes_starved, 0);
+SHOW_FUNCTION(aether_front_merges_show, hd->front_merges, 0);
+SHOW_FUNCTION(aether_fifo_batch_show, hd->fifo_batch, 0);
+SHOW_FUNCTION(aether_latency_ema_show, hd->read_latency_ema / 1000, 0);
+SHOW_FUNCTION(aether_tight_mode_show, hd->tight_mode, 0);
 #undef SHOW_FUNCTION
 
 #define STORE_FUNCTION(__FUNC, __PTR, MIN, MAX, __CONV)			\
 static ssize_t __FUNC(struct elevator_queue *e, const char *page,	\
 		      size_t count)					\
 {									\
-	struct hybrid_data *hd = e->elevator_data;			\
+	struct aether_data *hd = e->elevator_data;			\
 	int __data;							\
-	hybrid_var_store(&__data, (page));				\
+	aether_var_store(&__data, (page));				\
 	if (__data < (MIN))						\
 		__data = (MIN);						\
 	else if (__data > (MAX))					\
@@ -358,62 +358,62 @@ static ssize_t __FUNC(struct elevator_queue *e, const char *page,	\
 		*(__PTR) = __data;					\
 	return count;							\
 }
-STORE_FUNCTION(hybrid_read_expire_store, &hd->fifo_expire[READ], 0, INT_MAX, 1);
-STORE_FUNCTION(hybrid_write_expire_store, &hd->fifo_expire[WRITE], 0, INT_MAX, 1);
-STORE_FUNCTION(hybrid_writes_starved_store, &hd->writes_starved, 0, INT_MAX, 0);
-STORE_FUNCTION(hybrid_front_merges_store, &hd->front_merges, 0, 1, 0);
-STORE_FUNCTION(hybrid_fifo_batch_store, &hd->fifo_batch, 0, INT_MAX, 0);
+STORE_FUNCTION(aether_read_expire_store, &hd->fifo_expire[READ], 0, INT_MAX, 1);
+STORE_FUNCTION(aether_write_expire_store, &hd->fifo_expire[WRITE], 0, INT_MAX, 1);
+STORE_FUNCTION(aether_writes_starved_store, &hd->writes_starved, 0, INT_MAX, 0);
+STORE_FUNCTION(aether_front_merges_store, &hd->front_merges, 0, 1, 0);
+STORE_FUNCTION(aether_fifo_batch_store, &hd->fifo_batch, 0, INT_MAX, 0);
 #undef SHOW_FUNCTION
 #undef STORE_FUNCTION
 
-#define HYBRID_ATTR(name) \
-	__ATTR(name, S_IRUGO | S_IWUSR, hybrid_##name##_show, \
-					hybrid_##name##_store)
+#define AETHER_ATTR(name) \
+	__ATTR(name, S_IRUGO | S_IWUSR, aether_##name##_show, \
+					aether_##name##_store)
 
-static struct elv_fs_entry hybrid_attrs[] = {
-	HYBRID_ATTR(read_expire),
-	HYBRID_ATTR(write_expire),
-	HYBRID_ATTR(writes_starved),
-	HYBRID_ATTR(front_merges),
-	HYBRID_ATTR(fifo_batch),
-	HYBRID_ATTR(latency_ema),
-	HYBRID_ATTR(tight_mode),
+static struct elv_fs_entry aether_attrs[] = {
+	AETHER_ATTR(read_expire),
+	AETHER_ATTR(write_expire),
+	AETHER_ATTR(writes_starved),
+	AETHER_ATTR(front_merges),
+	AETHER_ATTR(fifo_batch),
+	AETHER_ATTR(latency_ema),
+	AETHER_ATTR(tight_mode),
 	__ATTR_NULL
 };
 
-static struct elevator_type iosched_hybrid = {
+static struct elevator_type iosched_aether = {
 	.ops.sq = {
-		.elevator_merge_fn		= hybrid_merge,
-		.elevator_merged_fn		= hybrid_merged_request,
-		.elevator_merge_req_fn		= hybrid_merged_requests,
-		.elevator_dispatch_fn		= hybrid_dispatch_requests,
-		.elevator_add_req_fn		= hybrid_add_request,
-		.elevator_completed_req_fn	= hybrid_completed_request,
+		.elevator_merge_fn		= aether_merge,
+		.elevator_merged_fn		= aether_merged_request,
+		.elevator_merge_req_fn		= aether_merged_requests,
+		.elevator_dispatch_fn		= aether_dispatch_requests,
+		.elevator_add_req_fn		= aether_add_request,
+		.elevator_completed_req_fn	= aether_completed_request,
 		.elevator_former_req_fn		= elv_rb_former_request,
 		.elevator_latter_req_fn		= elv_rb_latter_request,
-		.elevator_init_fn		= hybrid_init_queue,
-		.elevator_exit_fn		= hybrid_exit_queue,
+		.elevator_init_fn		= aether_init_queue,
+		.elevator_exit_fn		= aether_exit_queue,
 	},
 
-	.elevator_attrs = hybrid_attrs,
-	.elevator_name = "hybrid",
+	.elevator_attrs = aether_attrs,
+	.elevator_name = "aether",
 	.elevator_owner = THIS_MODULE,
 };
 
-static int __init hybrid_init(void)
+static int __init aether_init(void)
 {
-	return elv_register(&iosched_hybrid);
+	return elv_register(&iosched_aether);
 }
 
-static void __exit hybrid_exit(void)
+static void __exit aether_exit(void)
 {
-	elv_unregister(&iosched_hybrid);
+	elv_unregister(&iosched_aether);
 }
 
-module_init(hybrid_init);
-module_exit(hybrid_exit);
+module_init(aether_init);
+module_exit(aether_exit);
 
-MODULE_AUTHOR("hybrid");
+MODULE_AUTHOR("aether");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Hybrid IO scheduler: Deadline + CFQ thinktime + Kyber latency");
+MODULE_DESCRIPTION("Aether IO scheduler: Deadline + CFQ thinktime + Kyber latency");
 MODULE_VERSION("2.0");
