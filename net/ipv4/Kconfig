@@ -693,6 +693,16 @@ config TCP_CONG_FLUX
 	and Cubic's aggressive window growth. Designed for maximum throughput
 	on lossy links (cellular, WiFi).
 
+config TCP_CONG_SWIFT
+	tristate "Swift TCP"
+	default n
+	---help---
+	Swift is an adaptive TCP congestion control that detects link quality
+	and tunes itself. On stable links (low loss, low jitter) it behaves
+	aggressively for maximum throughput. On unstable links (lossy, high
+	jitter) it smooths bandwidth estimates, widens measurement windows,
+	and reduces probe gain. Transitions use hysteresis for stability.
+
 choice
 	prompt "Default TCP congestion control"
 	default DEFAULT_CUBIC
@@ -732,6 +742,9 @@ choice
 
 	config DEFAULT_FLUX
 		bool "Flux" if TCP_CONG_FLUX=y
+
+	config DEFAULT_SWIFT
+		bool "Swift" if TCP_CONG_SWIFT=y
 
 	config DEFAULT_RENO
 		bool "Reno"
