@@ -683,6 +683,16 @@ config TCP_CONG_BBR
 	bufferbloat, policers, or AQM schemes that do not provide a delay
 	signal. It requires the fq ("Fair Queue") pacing packet scheduler.
 
+config TCP_CONG_FLUX
+	tristate "Flux TCP"
+	default n
+	---help---
+	Flux is a unified TCP congestion control combining BBR, Westwood,
+	and Cubic. Uses BBR's state machine and delivery-rate estimation,
+	Westwood's ACK-rate bandwidth filter and loss-tolerant ssthresh,
+	and Cubic's aggressive window growth. Designed for maximum throughput
+	on lossy links (cellular, WiFi).
+
 choice
 	prompt "Default TCP congestion control"
 	default DEFAULT_CUBIC
@@ -720,6 +730,9 @@ choice
 	config DEFAULT_BBR
 		bool "BBR" if TCP_CONG_BBR=y
 
+	config DEFAULT_FLUX
+		bool "Flux" if TCP_CONG_FLUX=y
+
 	config DEFAULT_RENO
 		bool "Reno"
 endchoice
@@ -744,6 +757,7 @@ config DEFAULT_TCP_CONG
 	default "dctcp" if DEFAULT_DCTCP
 	default "cdg" if DEFAULT_CDG
 	default "bbr" if DEFAULT_BBR
+	default "flux" if DEFAULT_FLUX
 	default "cubic"
 
 config TCP_MD5SIG
