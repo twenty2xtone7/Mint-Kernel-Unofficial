@@ -1,18 +1,12 @@
 /*
  * Monolith I/O scheduler
  *
- * Ultimate unified scheduler fusing NOOP, Deadline, SIO, Zen, Maple,
- * CFQ, Kyber, Anxiety, FIOPS, and BFQ concepts into one engine.
- *
- * Features:
- *   - Quad FIFO queues with per-queue expiry
- *   - Anxiety-style sync_ratio/batch_count batching
- *   - writes_starved with priority tiers (sync read > sync write > async read > async write)
- *   - CFQ-style thinktime detection with last-direction memory
- *   - Kyber-style latency EMA with dynamic expire scaling
- *   - Expiry boosting: flush all expired entries on timeout
- *   - Clock-based expiration scanning
- *   - NOOP O(1) FIFO fallback path
+ * Ultimate unified scheduler with self-tuning AI:
+ *   - Auto-expiry: tracks read latency EMA, sets expiry = 4x observed
+ *   - Adaptive starved: measures write interference on reads
+ *   - Burst detection: instant read-priority mode on app launch
+ *   - Auto-thinktime: median of recent idle periods
+ *   - Self-calibrating via continuous feedback loop
  *
  * Copyright (C) 2022 monolith
  */
@@ -26,75 +20,86 @@
 #include <linux/init.h>
 #include <linux/compiler.h>
 #include <linux/rbtree.h>
+#include <linux/math64.h>
 
-/* ------------------------------------------------------------------ */
-/* Priority queue indices                                              */
-/* ------------------------------------------------------------------ */
 enum {
-	MD_SR = 0,	/* sync read  — highest dispatch priority */
-	MD_SW = 1,	/* sync write */
-	MD_AR = 2,	/* async read */
-	MD_AW = 3,	/* async write — lowest dispatch priority */
-	MD_NR_QUEUES,
+	MD_SR = 0, MD_SW = 1, MD_AR = 2, MD_AW = 3, MD_NR_QUEUES,
 };
 
-/* ------------------------------------------------------------------ */
-/* Default tunables (all aggressive for UFS/eMMC)                      */
-/* ------------------------------------------------------------------ */
-static const int sync_read_expire	= HZ / 50;	/*  20 ms */
-static const int sync_write_expire	= HZ / 10;	/* 100 ms */
-static const int async_read_expire	= HZ / 25;	/*  40 ms */
-static const int async_write_expire	= HZ / 5;	/* 200 ms */
-static const int writes_starved		= 10;
-static const int sync_ratio		= 6;		/* syncs before 1 async */
-static const int batch_count		= 3;		/* repeats of sync_ratio */
-static const int fifo_batch		= 4;
-static const int thinktime_threshold	= 2;		/* jiffies */
-static const u64 latency_target_ns	= 5ULL * NSEC_PER_MSEC;
-static const int latency_window		= 4;		/* samples before re-eval */
+/* Base defaults (floor values the AI tunes upward from) */
+static const int base_sr_expire	= HZ / 100;	/* 10ms floor */
+static const int base_sw_expire	= HZ / 20;	/* 50ms */
+static const int base_ar_expire	= HZ / 50;	/* 20ms */
+static const int base_aw_expire	= HZ / 10;	/* 100ms */
+static const int base_starved	= 12;
+static const int base_ratio	= 6;
+static const int base_bcount	= 3;
+static const int base_fifo_batch	= 4;
+static const int tune_interval	= 128;		/* retune every N dispatches */
 
-/* ------------------------------------------------------------------ */
-/* Per-device data                                                     */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Self-tuning data structures                          */
+/* ==================================================== */
+struct md_tuner {
+	/* Read latency tracking */
+	u64 rd_lat_ema;		/* ns, exp moving average */
+	u64 rd_lat_peak;	/* ns, peak this window */
+	u32 rd_lat_cnt;		/* samples this window */
+
+	/* Write interference tracking */
+	u64 rd_lat_nowrite;	/* read ema, no concurrent write */
+	u64 rd_lat_withwrite;	/* read ema, with concurrent write */
+	u64 rd_lat_w_ewma;	/* write ema for comparison */
+	u32 interference_ratio;	/* withwrite / nowrite * 256 */
+
+	/* Thinktime ring buffer */
+	u32 think_ring[16];	/* jiffies */
+	u8  think_idx;
+	u8  think_count;
+
+	/* Burst detection */
+	u64 burst_deadline;	/* jiffies */
+	u32 burst_reqs;		/* reads since burst started */
+	u32 burst_seq;		/* burst ID */
+
+	/* Dispatch counter */
+	u32 ops;
+
+	/* Computed adaptive values (jiffies / count) */
+	int expire_sr, expire_sw, expire_ar, expire_aw;
+	int starved;
+	int thinktime;
+	int fifo_batch;
+};
+
 struct md_data {
-	/* Quad FIFO queues */
 	struct list_head fifo[MD_NR_QUEUES];
 	int fifo_expire[MD_NR_QUEUES];
 
-	/* Tunables */
 	int writes_starved;
 	int sync_ratio;
 	int batch_count;
 	int fifo_batch;
 
-	/* Starvation / batching state */
 	unsigned int starved;
 	int batch_remaining;
+	int ratio_counter;
+	int batch_counter;
 
-	/* Anxiety-style sync/async interleaving */
-	int ratio_counter;		/* counts syncs before async */
-	int batch_counter;		/* counts ratio repeats */
-
-	/* Thinktime */
 	unsigned long last_dispatch;
-	int last_dir;			/* MD_SR/MD_SW/etc or -1 */
+	int last_dir;
 	unsigned int seen_idle;
 
-	/* Kyber-style latency tracking */
-	u64 read_latency_ema;		/* ns */
-	u64 read_latency_peak;		/* ns this window */
-	int lat_samples;		/* samples this window */
-	unsigned int scale_down;	/* 1 = halve expiries */
-
-	/* Front-merge support */
+	/* Adaptive tuner */
+	struct md_tuner tn;
 	int front_merges;
 	struct rb_root sort[MD_NR_QUEUES];
 	struct request *next_rq[MD_NR_QUEUES];
 };
 
-/* ------------------------------------------------------------------ */
-/* Queue helpers                                                       */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Helpers                                               */
+/* ==================================================== */
 static int md_rq_idx(struct request *rq)
 {
 	int ddir = rq_data_dir(rq);
@@ -126,25 +131,135 @@ static void md_del_rq_rb(struct md_data *md, struct request *rq)
 	elv_rb_del(md_rb_root(md, rq), rq);
 }
 
-static int md_effective_expire(struct md_data *md, int idx)
+/* ==================================================== */
+/* Self-tuning engine                                    */
+/* ==================================================== */
+static void md_retune(struct md_data *md)
 {
-	int e = md->fifo_expire[idx];
-	if (md->scale_down && (idx == MD_SR || idx == MD_AR))
-		e >>= 1;
-	return max(e, 1);
+	struct md_tuner *tn = &md->tn;
+
+	/* Auto-expiry: sync read = 4x observed latency, floor to base */
+	if (tn->rd_lat_ema) {
+		int sr_ms = (int)div64_u64(tn->rd_lat_ema * 4, NSEC_PER_MSEC);
+		sr_ms = clamp(sr_ms, jiffies_to_msecs(base_sr_expire), 80);
+		tn->expire_sr = msecs_to_jiffies(sr_ms);
+
+		/* Other expiries scale relative to SR */
+		tn->expire_sw = msecs_to_jiffies(clamp(sr_ms * 5, 50, 200));
+		tn->expire_ar = msecs_to_jiffies(clamp(sr_ms * 2, 20, 80));
+		tn->expire_aw = msecs_to_jiffies(clamp(sr_ms * 10, 100, 400));
+
+		md->fifo_expire[MD_SR] = tn->expire_sr;
+		md->fifo_expire[MD_SW] = tn->expire_sw;
+		md->fifo_expire[MD_AR] = tn->expire_ar;
+		md->fifo_expire[MD_AW] = tn->expire_aw;
+	}
+
+	/* Adaptive starved: if writes don't hurt reads, starve less */
+	if (tn->rd_lat_nowrite && tn->rd_lat_withwrite &&
+	    tn->rd_lat_withwrite > tn->rd_lat_nowrite) {
+		tn->interference_ratio = (u32)div64_u64(
+			tn->rd_lat_withwrite * 256, tn->rd_lat_nowrite);
+		/* ratio > 256 means writes hurt reads */
+		if (tn->interference_ratio > 320)
+			tn->starved = min(tn->starved + 1, 20);
+		else if (tn->interference_ratio < 192)
+			tn->starved = max(tn->starved - 1, 4);
+	}
+	md->writes_starved = tn->starved;
+
+	/* Auto-thinktime: median of recent idle periods */
+	if (tn->think_count >= 4) {
+		u32 sorted[16];
+		int i, j;
+		memcpy(sorted, tn->think_ring, sizeof(tn->think_ring));
+		/* Bubble sort 16 elements is fine once per 128 dispatches */
+		for (i = 0; i < tn->think_count - 1; i++)
+			for (j = i + 1; j < tn->think_count; j++)
+				if (sorted[i] > sorted[j])
+					swap(sorted[i], sorted[j]);
+		tn->thinktime = sorted[tn->think_count / 2];
+		tn->thinktime = clamp(tn->thinktime, 1U, 10U);
+	}
+
+	/* Auto fifo_batch: scale with device speed */
+	if (tn->rd_lat_ema) {
+		u64 lat_us = tn->rd_lat_ema / NSEC_PER_USEC;
+		if (lat_us < 500)
+			tn->fifo_batch = clamp(tn->fifo_batch + 1, 2, 16);
+		else if (lat_us > 2000)
+			tn->fifo_batch = clamp(tn->fifo_batch - 1, 1, 8);
+	}
+	md->fifo_batch = tn->fifo_batch;
 }
 
-/* ------------------------------------------------------------------ */
-/* Core elevator callbacks                                             */
-/* ------------------------------------------------------------------ */
+/* Record thinktime sample */
+static void md_sample_thinktime(struct md_data *md)
+{
+	struct md_tuner *tn = &md->tn;
+	tn->think_ring[tn->think_idx] = tn->thinktime;
+	tn->think_idx = (tn->think_idx + 1) % ARRAY_SIZE(tn->think_ring);
+	if (tn->think_count < ARRAY_SIZE(tn->think_ring))
+		tn->think_count++;
+}
+
+/* Record a read completion latency sample */
+static void md_sample_latency(struct md_data *md, u64 lat_ns,
+			      int writes_active)
+{
+	struct md_tuner *tn = &md->tn;
+
+	/* Update EMA */
+	if (tn->rd_lat_ema)
+		tn->rd_lat_ema += (lat_ns - tn->rd_lat_ema) >> 3;
+	else
+		tn->rd_lat_ema = lat_ns;
+
+	/* Track peak in window */
+	if (lat_ns > tn->rd_lat_peak)
+		tn->rd_lat_peak = lat_ns;
+
+	/* Track write interference */
+	if (writes_active) {
+		if (tn->rd_lat_withwrite)
+			tn->rd_lat_withwrite += (lat_ns - tn->rd_lat_withwrite) >> 2;
+		else
+			tn->rd_lat_withwrite = lat_ns;
+	} else {
+		if (tn->rd_lat_nowrite)
+			tn->rd_lat_nowrite += (lat_ns - tn->rd_lat_nowrite) >> 2;
+		else
+			tn->rd_lat_nowrite = lat_ns;
+	}
+
+	tn->rd_lat_cnt++;
+}
+
+/* ==================================================== */
+/* Core callbacks                                        */
+/* ==================================================== */
 static void md_add_request(struct request_queue *q, struct request *rq)
 {
 	struct md_data *md = q->elevator->elevator_data;
 	int idx = md_rq_idx(rq);
 
 	md_add_rq_rb(md, rq);
-	rq->fifo_time = jiffies + md_effective_expire(md, idx);
+	rq->fifo_time = jiffies + md->fifo_expire[idx];
 	list_add_tail(&rq->queuelist, &md->fifo[idx]);
+
+	/* Burst detection: sync reads arriving close together */
+	if (idx == MD_SR) {
+		struct md_tuner *tn = &md->tn;
+		if (!tn->burst_reqs || time_after(jiffies, tn->burst_deadline)) {
+			tn->burst_seq++;
+			if (tn->burst_reqs)
+				tn->burst_deadline = jiffies + 4;
+			tn->burst_reqs = 1;
+		} else {
+			tn->burst_reqs++;
+			tn->burst_deadline = jiffies + 4;
+		}
+	}
 }
 
 static void md_remove_request(struct request_queue *q, struct request *rq)
@@ -173,7 +288,6 @@ md_merge(struct request_queue *q, struct request **req, struct bio *bio)
 			}
 		}
 	}
-	/* Back-merge fallback via FIFO tail */
 	if (!list_empty(&md->fifo[idx])) {
 		__rq = list_entry_rq(md->fifo[idx].prev);
 		if (__rq && elv_bio_merge_ok(__rq, bio)) {
@@ -189,8 +303,7 @@ static void md_merged_request(struct request_queue *q,
 {
 	struct md_data *md = q->elevator->elevator_data;
 	if (type == ELEVATOR_FRONT_MERGE) {
-		int idx = md_rq_idx(req);
-		elv_rb_del(&md->sort[idx], req);
+		elv_rb_del(&md->sort[md_rq_idx(req)], req);
 		md_add_rq_rb(md, req);
 	}
 }
@@ -206,22 +319,26 @@ static void md_merged_requests(struct request_queue *q,
 	md_remove_request(q, next);
 }
 
-/* ------------------------------------------------------------------ */
-/* Thinktime detection                                                 */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Thinktime                                             */
+/* ==================================================== */
 static void md_thinktime(struct md_data *md)
 {
 	if (md->last_dispatch &&
-	    time_after(jiffies, md->last_dispatch + thinktime_threshold)) {
+	    time_after(jiffies, md->last_dispatch + md->tn.thinktime)) {
+		if (!md->seen_idle) {
+			md->tn.thinktime = jiffies - md->last_dispatch;
+			if (md->tn.thinktime > 1)
+				md_sample_thinktime(md);
+		}
 		md->seen_idle = 1;
 		md->starved = 0;
 	}
 }
 
-/* ------------------------------------------------------------------ */
-/* Expiry scan — flush all expired entries from a queue               */
-/* Returns 1 if an expired entry was dispatched.                       */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Expiry flush                                          */
+/* ==================================================== */
 static int md_flush_expired(struct md_data *md, struct request_queue *q,
 			    int idx)
 {
@@ -238,14 +355,15 @@ static int md_flush_expired(struct md_data *md, struct request_queue *q,
 	return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* Kyber-style latency callback                                        */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Latency callback                                      */
+/* ==================================================== */
 static void md_completed_request(struct request_queue *q,
 				 struct request *rq)
 {
 	struct md_data *md = q->elevator->elevator_data;
 	u64 now, start, lat;
+	int writes_active;
 
 	if (rq_data_dir(rq) != READ || blk_rq_is_passthrough(rq))
 		return;
@@ -254,48 +372,49 @@ static void md_completed_request(struct request_queue *q,
 	start = rq_start_time_ns(rq);
 	lat = start ? now - start : 0;
 
-	if (lat > md->read_latency_peak)
-		md->read_latency_peak = lat;
+	writes_active = !list_empty(&md->fifo[MD_SW]) ||
+			!list_empty(&md->fifo[MD_AW]);
 
-	if (md->read_latency_ema)
-		md->read_latency_ema += (lat - md->read_latency_ema) >> 3;
-	else
-		md->read_latency_ema = lat;
+	md_sample_latency(md, lat, writes_active);
 
-	if (++md->lat_samples >= latency_window) {
-		md->scale_down = (md->read_latency_peak > latency_target_ns);
-		md->read_latency_peak = 0;
-		md->lat_samples = 0;
+	/* Retune periodically */
+	if (++md->tn.rd_lat_cnt >= tune_interval) {
+		md->tn.rd_lat_cnt = 0;
+		md_retune(md);
 	}
 }
 
-/* ------------------------------------------------------------------ */
-/* Dispatch — the heart of Monolith                                    */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Dispatch                                              */
+/* ==================================================== */
 static int md_dispatch_requests(struct request_queue *q, int force)
 {
 	struct md_data *md = q->elevator->elevator_data;
+	struct md_tuner *tn = &md->tn;
 	struct request *rq;
-	int i;
+	int i, in_burst;
 
-	/* Quick empty check */
 	if (list_empty(&md->fifo[MD_SR]) && list_empty(&md->fifo[MD_SW]) &&
 	    list_empty(&md->fifo[MD_AR]) && list_empty(&md->fifo[MD_AW]))
 		return 0;
 
-	/* Thinktime: reset starved if we were idle */
+	md->tn.ops++;
 	md_thinktime(md);
+	in_burst = tn->burst_reqs >= 4 &&
+		   !time_after(jiffies, tn->burst_deadline);
 
-	/* Scale-down shrinks fifo_batch to react faster */
-	if (md->scale_down && md->batch_remaining > md->fifo_batch >> 1)
-		md->batch_remaining = md->fifo_batch >> 1;
-
-	/* -- STAGE 1: Expiry flush (timeout override) -- */
+	/* Stage 1: Expiry flush */
 	for (i = MD_SR; i <= MD_AW; i++)
 		if (md_flush_expired(md, q, i))
 			goto out;
 
-	/* -- STAGE 2: Sequential read boost (thinktime + last_dir) -- */
+	/* Stage 2: Burst mode — reads only */
+	if (in_burst && !list_empty(&md->fifo[MD_SR])) {
+		rq = rq_entry_fifo(md->fifo[MD_SR].next);
+		goto dispatch_rq;
+	}
+
+	/* Stage 3: Sequential boost */
 	if (md->seen_idle && md->last_dir >= 0 &&
 	    !list_empty(&md->fifo[md->last_dir])) {
 		md->seen_idle = 0;
@@ -304,36 +423,33 @@ static int md_dispatch_requests(struct request_queue *q, int force)
 	}
 	md->seen_idle = 0;
 
-	/* -- STAGE 3: Anxiety-style sync/async interleaving -- */
+	/* Stage 4: Anxiety interleaving */
 	if (md->batch_counter < md->batch_count) {
 		if (md->ratio_counter < md->sync_ratio) {
-			/* Dispatch sync (read > write via starved) */
-			if (md->starved < md->writes_starved) {
+			if (md->starved < md->writes_starved ||
+			    in_burst) {
 				if (!list_empty(&md->fifo[MD_SR])) {
 					rq = rq_entry_fifo(md->fifo[MD_SR].next);
 					md->ratio_counter++;
 					goto dispatch_rq;
 				}
 			}
-			if (!list_empty(&md->fifo[MD_SW])) {
+			if (!list_empty(&md->fifo[MD_SW]) &&
+			    !in_burst) {
 				rq = rq_entry_fifo(md->fifo[MD_SW].next);
-				if (!list_empty(&md->fifo[MD_SR])) {
-					/* Sync read exists — only write if starved */
-					if (md->starved < md->writes_starved) {
-						rq = rq_entry_fifo(md->fifo[MD_SR].next);
-						md->ratio_counter++;
-						goto dispatch_rq;
-					}
+				if (!list_empty(&md->fifo[MD_SR]) &&
+				    md->starved < md->writes_starved) {
+					rq = rq_entry_fifo(md->fifo[MD_SR].next);
+					md->ratio_counter++;
+					goto dispatch_rq;
 				}
 				md->starved = 0;
 				md->ratio_counter++;
 				goto dispatch_rq;
 			}
-			/* No syncs left: fall through to async */
 			md->ratio_counter = md->sync_ratio;
 		}
-		if (md->ratio_counter >= md->sync_ratio) {
-			/* Async dispatch */
+		if (md->ratio_counter >= md->sync_ratio && !in_burst) {
 			if (!list_empty(&md->fifo[MD_AR])) {
 				rq = rq_entry_fifo(md->fifo[MD_AR].next);
 				md->ratio_counter = 0;
@@ -341,7 +457,6 @@ static int md_dispatch_requests(struct request_queue *q, int force)
 				goto dispatch_rq;
 			}
 			if (!list_empty(&md->fifo[MD_AW])) {
-				rq = rq_entry_fifo(md->fifo[MD_AW].next);
 				if (!list_empty(&md->fifo[MD_SR]) &&
 				    md->starved < md->writes_starved) {
 					rq = rq_entry_fifo(md->fifo[MD_SR].next);
@@ -358,8 +473,8 @@ static int md_dispatch_requests(struct request_queue *q, int force)
 		}
 	}
 
-	/* -- STAGE 4: Priority fallback (read bias) -- */
-	if (md->starved < md->writes_starved) {
+	/* Stage 5: Priority fallback */
+	if (in_burst || md->starved < md->writes_starved) {
 		if (!list_empty(&md->fifo[MD_SR])) {
 			rq = rq_entry_fifo(md->fifo[MD_SR].next);
 			goto dispatch_rq;
@@ -404,9 +519,9 @@ out:
 	return 1;
 }
 
-/* ------------------------------------------------------------------ */
-/* Init / exit                                                         */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* Init / exit                                           */
+/* ==================================================== */
 static void md_exit_queue(struct elevator_queue *e)
 {
 	kfree(e->elevator_data);
@@ -433,17 +548,28 @@ static int md_init_queue(struct request_queue *q, struct elevator_type *e)
 		INIT_LIST_HEAD(&md->fifo[i]);
 		md->sort[i] = RB_ROOT;
 	}
-	md->fifo_expire[MD_SR] = sync_read_expire;
-	md->fifo_expire[MD_SW] = sync_write_expire;
-	md->fifo_expire[MD_AR] = async_read_expire;
-	md->fifo_expire[MD_AW] = async_write_expire;
-	md->writes_starved = writes_starved;
-	md->sync_ratio = sync_ratio;
-	md->batch_count = batch_count;
-	md->fifo_batch = fifo_batch;
+
+	/* Apply base defaults */
+	md->fifo_expire[MD_SR] = base_sr_expire;
+	md->fifo_expire[MD_SW] = base_sw_expire;
+	md->fifo_expire[MD_AR] = base_ar_expire;
+	md->fifo_expire[MD_AW] = base_aw_expire;
+	md->writes_starved = base_starved;
+	md->sync_ratio = base_ratio;
+	md->batch_count = base_bcount;
+	md->fifo_batch = base_fifo_batch;
 	md->last_dispatch = jiffies;
 	md->last_dir = -1;
 	md->front_merges = 1;
+
+	/* Init self-tuning defaults */
+	md->tn.expire_sr = base_sr_expire;
+	md->tn.expire_sw = base_sw_expire;
+	md->tn.expire_ar = base_ar_expire;
+	md->tn.expire_aw = base_aw_expire;
+	md->tn.starved = base_starved;
+	md->tn.thinktime = 2;
+	md->tn.fifo_batch = base_fifo_batch;
 
 	spin_lock_irq(q->queue_lock);
 	q->elevator = eq;
@@ -451,14 +577,13 @@ static int md_init_queue(struct request_queue *q, struct elevator_type *e)
 	return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* sysfs                                                               */
-/* ------------------------------------------------------------------ */
+/* ==================================================== */
+/* sysfs                                                 */
+/* ==================================================== */
 static ssize_t md_var_show(int var, char *page)
 {
 	return sprintf(page, "%d\n", var);
 }
-
 static void md_var_store(int *var, const char *page)
 {
 	*var = simple_strtol((char *)page, NULL, 10);
@@ -469,20 +594,19 @@ static ssize_t __FUNC(struct elevator_queue *e, char *page)		\
 {									\
 	struct md_data *md = e->elevator_data;				\
 	int __data = __VAR;						\
-	if (__CONV)							\
-		__data = jiffies_to_msecs(__data);			\
+	if (__CONV) __data = jiffies_to_msecs(__data);			\
 	return md_var_show(__data, page);				\
 }
-SHOW_FN(md_sync_read_expire_show,	md->fifo_expire[MD_SR], 1);
-SHOW_FN(md_sync_write_expire_show,	md->fifo_expire[MD_SW], 1);
-SHOW_FN(md_async_read_expire_show,	md->fifo_expire[MD_AR], 1);
-SHOW_FN(md_async_write_expire_show,	md->fifo_expire[MD_AW], 1);
-SHOW_FN(md_writes_starved_show,		md->writes_starved, 0);
-SHOW_FN(md_sync_ratio_show,		md->sync_ratio, 0);
-SHOW_FN(md_batch_count_show,		md->batch_count, 0);
-SHOW_FN(md_fifo_batch_show,		md->fifo_batch, 0);
-SHOW_FN(md_latency_ema_show,		md->read_latency_ema / 1000, 0);
-SHOW_FN(md_scale_down_show,		md->scale_down, 0);
+SHOW_FN(md_sync_read_expire_show,	md->tn.expire_sr, 1);
+SHOW_FN(md_sync_write_expire_show,	md->tn.expire_sw, 1);
+SHOW_FN(md_async_read_expire_show,	md->tn.expire_ar, 1);
+SHOW_FN(md_async_write_expire_show,	md->tn.expire_aw, 1);
+SHOW_FN(md_writes_starved_show,		md->tn.starved, 0);
+SHOW_FN(md_fifo_batch_show,		md->tn.fifo_batch, 0);
+SHOW_FN(md_thinktime_show,		md->tn.thinktime, 0);
+SHOW_FN(md_rd_lat_ema_show,		md->tn.rd_lat_ema / 1000, 0);
+SHOW_FN(md_interference_show,		md->tn.interference_ratio, 0);
+SHOW_FN(md_ops_show,			md->tn.ops, 0);
 #undef SHOW_FN
 
 #define STORE_FN(__FUNC, __PTR, MIN, MAX, __CONV)			\
@@ -492,24 +616,19 @@ static ssize_t __FUNC(struct elevator_queue *e, const char *page,	\
 	struct md_data *md = e->elevator_data;				\
 	int __data;							\
 	md_var_store(&__data, (page));					\
-	if (__data < (MIN))						\
-		__data = (MIN);						\
-	else if (__data > (MAX))					\
-		__data = (MAX);						\
+	__data = clamp(__data, (MIN), (MAX));				\
 	if (__CONV)							\
 		*(__PTR) = msecs_to_jiffies(__data);			\
 	else								\
 		*(__PTR) = __data;					\
 	return count;							\
 }
-STORE_FN(md_sync_read_expire_store,	&md->fifo_expire[MD_SR], 0, INT_MAX, 1);
-STORE_FN(md_sync_write_expire_store,	&md->fifo_expire[MD_SW], 0, INT_MAX, 1);
-STORE_FN(md_async_read_expire_store,	&md->fifo_expire[MD_AR], 0, INT_MAX, 1);
-STORE_FN(md_async_write_expire_store,	&md->fifo_expire[MD_AW], 0, INT_MAX, 1);
-STORE_FN(md_writes_starved_store,	&md->writes_starved, 0, INT_MAX, 0);
-STORE_FN(md_sync_ratio_store,		&md->sync_ratio, 1, INT_MAX, 0);
-STORE_FN(md_batch_count_store,		&md->batch_count, 1, INT_MAX, 0);
-STORE_FN(md_fifo_batch_store,		&md->fifo_batch, 0, INT_MAX, 0);
+STORE_FN(md_sync_read_expire_store,	&md->tn.expire_sr, 0, INT_MAX, 1);
+STORE_FN(md_sync_write_expire_store,	&md->tn.expire_sw, 0, INT_MAX, 1);
+STORE_FN(md_async_read_expire_store,	&md->tn.expire_ar, 0, INT_MAX, 1);
+STORE_FN(md_async_write_expire_store,	&md->tn.expire_aw, 0, INT_MAX, 1);
+STORE_FN(md_writes_starved_store,	&md->tn.starved, 0, INT_MAX, 0);
+STORE_FN(md_fifo_batch_store,		&md->tn.fifo_batch, 0, INT_MAX, 0);
 #undef SHOW_FN
 #undef STORE_FN
 
@@ -522,11 +641,11 @@ static struct elv_fs_entry md_attrs[] = {
 	MD_ATTR(async_read_expire),
 	MD_ATTR(async_write_expire),
 	MD_ATTR(writes_starved),
-	MD_ATTR(sync_ratio),
-	MD_ATTR(batch_count),
 	MD_ATTR(fifo_batch),
-	__ATTR(latency_ema, S_IRUGO, md_latency_ema_show, NULL),
-	__ATTR(scale_down, S_IRUGO, md_scale_down_show, NULL),
+	MD_ATTR(thinktime),
+	__ATTR(rd_lat_ema, S_IRUGO, md_rd_lat_ema_show, NULL),
+	__ATTR(interference, S_IRUGO, md_interference_show, NULL),
+	__ATTR(ops, S_IRUGO, md_ops_show, NULL),
 	__ATTR_NULL
 };
 
@@ -564,5 +683,5 @@ module_exit(md_exit);
 
 MODULE_AUTHOR("monolith");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Monolith IO scheduler: unified NOOP+Deadline+SIO+Zen+Maple+CFQ+Kyber+Anxiety+FIOPS+BFQ");
-MODULE_VERSION("1.0");
+MODULE_DESCRIPTION("Monolith IO scheduler: unified scheduler with self-tuning AI");
+MODULE_VERSION("2.0");
