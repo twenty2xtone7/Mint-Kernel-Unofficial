@@ -147,7 +147,7 @@ static void flux_westwood_update(struct sock *sk, u32 bytes, u32 rtt)
 {
 	struct flux *f = inet_csk_ca(sk);
 	u32 delta = tcp_jiffies32 - f->ww_win_start;
-	u32 win = max(rtt, FLUX_RTT_MIN_US) << 2;
+	u32 win = max_t(u32, rtt, FLUX_RTT_MIN_US) << 2;
 
 	f->ww_acked += bytes;
 	f->ww_rtt = rtt;

@@ -79,21 +79,15 @@ struct swift {
 	u32	ww_rtt;
 	u32	ww_rtt_min;
 
-	/* Link quality tracking */
-	u32	lq_loss_start;
 	u32	lq_delivered;
 	u32	lq_lost;
-	u16	adapt_level;	/* 0=stable .. 3=unstable */
+	u16	adapt_level;
 
-	/* ML bandit */
 	u16	ml_reward_acc;
-	u16	ml_rtt_rounds;	/* RTTs accumulated in this evaluation */
-	u16	ml_interval;	/* RTTs between arm switches */
-	u8	ml_arm;		/* current arm (0..3) */
-	u8	ml_epsilon;	/* exploration probability * 100, decays by 1 per eval */
-	u8	ml_best_arm;	/* arm with highest reward so far */
-	u16	ml_arm_reward[4]; /* smoothed reward per arm */
-	u16	ml_arm_count[4];  /* selection count per arm */
+	u8	ml_arm:4,
+		ml_best_arm:4;
+	u8	ml_epsilon;
+	u16	ml_arm_reward[4];
 };
 
 /* Default arm profiles: [probe_boost, smooth_shift, ww_shift] */
@@ -115,6 +109,7 @@ static const u32 swift_pacing_gain_base[] = {
 
 #define SWIFT_CYCLE_LEN		8
 #define SWIFT_CYCLE_RAND	7
+#define SWIFT_ML_INTERVAL	8
 
 static const u32 swift_high_gain	= SWIFT_UNIT * 2885 / 1000 + 1;
 static const u32 swift_drain_gain	= SWIFT_UNIT * 1000 / 2885;
@@ -182,25 +177,19 @@ static void swift_ml_select_arm(struct swift *f)
 static void swift_ml_update_reward(struct swift *f, u32 delivered, u32 elapsed_us, u32 rtt_us)
 {
 	u32 reward;
-	u16 *acc, *cnt;
 
 	if (!elapsed_us || !rtt_us)
 		return;
 
-	/* Reward = delivered^2 / (elapsed_us * rtt_us / 1000), scaled to fit u16 */
 	reward = (u32)div64_u64((u64)delivered * delivered * 1000,
 				(u64)elapsed_us * rtt_us);
 	reward = min(reward, 65535U);
 
-	acc = &f->ml_arm_reward[f->ml_arm];
-	cnt = &f->ml_arm_count[f->ml_arm];
-
-	/* Exponential moving average with alpha = 1/4 */
-	if (*cnt)
-		*acc = ((u32)*acc * 3 + reward) >> 2;
+	if (f->ml_arm_reward[f->ml_arm])
+		f->ml_arm_reward[f->ml_arm] =
+			((u32)f->ml_arm_reward[f->ml_arm] * 3 + reward) >> 2;
 	else
-		*acc = reward;
-	(*cnt)++;
+		f->ml_arm_reward[f->ml_arm] = reward;
 }
 
 /* Evaluate link quality and update adapt_level */
@@ -257,18 +246,13 @@ static void swift_init(struct sock *sk)
 	f->adapt_level = 1;
 	f->lq_delivered = 0;
 	f->lq_lost = 0;
-	f->lq_loss_start = tcp_jiffies32;
 
 	f->ml_arm = 1;
 	f->ml_epsilon = 20;
 	f->ml_best_arm = 1;
-	f->ml_interval = 8;
-	f->ml_rtt_rounds = 0;
 	f->ml_reward_acc = 0;
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < 4; i++)
 		f->ml_arm_reward[i] = 0;
-		f->ml_arm_count[i] = 0;
-	}
 }
 
 static void swift_westwood_update(struct swift *f, u32 delta_jiffies,
@@ -388,8 +372,8 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 	f->lq_delivered += rs->delivered;
 	f->lq_lost += rs->losses;
 
-	/* Evaluate link quality and ML bandit every ml_interval RTTs */
-	if (f->rtt_cnt > 0 && (f->rtt_cnt % f->ml_interval) == 0) {
+	/* Evaluate link quality and ML bandit every SWIFT_ML_INTERVAL RTTs */
+	if (f->rtt_cnt > 0 && (f->rtt_cnt % SWIFT_ML_INTERVAL) == 0) {
 		f->rtt_cnt = 0;
 		swift_eval_link_quality(f);
 		swift_ml_select_arm(f);
@@ -405,15 +389,14 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 		round_start = 1;
 
 		/* ML: update reward at round boundary */
-		if (f->min_rtt_us && f->ml_rtt_rounds) {
+		if (f->min_rtt_us && f->epoch_start) {
 			u32 elapsed = jiffies_to_usecs(tcp_jiffies32 -
-					f->lq_loss_start);
+					f->epoch_start);
 			swift_ml_update_reward(f, f->ml_reward_acc,
 					       elapsed, f->min_rtt_us);
 		}
 		f->ml_reward_acc = 0;
-		f->ml_rtt_rounds++;
-		f->lq_loss_start = tcp_jiffies32;
+		f->epoch_start = tcp_jiffies32;
 	}
 
 	/* Accumulate delivered bytes for reward */
