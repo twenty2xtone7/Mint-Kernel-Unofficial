@@ -97,6 +97,14 @@ config IOSCHED_ANXIETY
 	  else. When a request comes in, it will use a lighweight
 	  selection algorithm to swiftly process the current pending task.
 
+config IOSCHED_MAZQ
+	tristate "MazQ I/O scheduler"
+	default n
+	---help---
+	  MazQ is a lightweight hybrid I/O scheduler combining Maple's
+	  4-way FIFO, Anxiety batch dispatch, and Zen FCFS. Minimal
+	  overhead — no clock reads, no stats, no meta queue.
+
 choice
 
 	prompt "Default I/O scheduler"
@@ -133,6 +141,9 @@ choice
 	config DEFAULT_MONOLITH
 		bool "MONOLITH" if IOSCHED_MONOLITH=y
 
+	config DEFAULT_MAZQ
+		bool "MazQ" if IOSCHED_MAZQ=y
+
 
 	config DEFAULT_NOOP
 		bool "No-op"
@@ -152,6 +163,7 @@ config DEFAULT_IOSCHED
 	default "aether" if DEFAULT_AETHER
 
 	default "monolith" if DEFAULT_MONOLITH
+	default "mazq" if DEFAULT_MAZQ
 
 	default "noop" if DEFAULT_NOOP
 

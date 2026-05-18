@@ -26,6 +26,7 @@ obj-$(CONFIG_IOSCHED_ANXIETY)	+= anxiety-iosched.o
 obj-$(CONFIG_IOSCHED_MAPLE)	+= maple-iosched.o
 obj-$(CONFIG_IOSCHED_AETHER)	+= aether-iosched.o
 obj-$(CONFIG_IOSCHED_MONOLITH)	+= monolith-iosched.o
+obj-$(CONFIG_IOSCHED_MAZQ)	+= mazq-iosched.o
 obj-$(CONFIG_IOSCHED_CFQ)	+= cfq-iosched.o
 obj-$(CONFIG_MQ_IOSCHED_DEADLINE)	+= mq-deadline.o
 obj-$(CONFIG_MQ_IOSCHED_KYBER)	+= kyber-iosched.o
