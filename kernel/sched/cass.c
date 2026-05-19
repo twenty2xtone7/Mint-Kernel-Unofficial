@@ -235,8 +235,24 @@ static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
 	return cass_best_cpu(p, prev_cpu, sync);
 }
 
+static struct ctl_table cass_ctl_table[] = {
+	{
+		.procname	= "cass_active",
+		.data		= NULL,
+		.maxlen		= 0,
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
 static int __init cass_init(void)
 {
+	static int cass_active = 1;
+
+	cass_ctl_table[0].data = &cass_active;
+	cass_ctl_table[0].maxlen = sizeof(cass_active);
+	register_sysctl("kernel", cass_ctl_table);
 	pr_alert("CASS scheduler active\n");
 	return 0;
 }
