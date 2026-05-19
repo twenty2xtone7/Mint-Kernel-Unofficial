@@ -1725,11 +1725,6 @@ bool try_to_unmap(struct page *page, enum ttu_flags flags,
 	return !page_mapcount(page);
 }
 
-static int page_not_mapped(struct page *page)
-{
-	return !page_mapped(page);
-};
-
 /**
  * try_to_munlock - try to munlock a page
  * @page: the page to be munlocked

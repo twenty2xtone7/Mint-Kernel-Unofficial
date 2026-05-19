@@ -126,15 +126,18 @@ static enum elv_merge mazq_merge(struct request_queue *q,
 				 struct request **req, struct bio *bio)
 {
 	struct mazq_data *md = q->elevator->elevator_data;
-	int d = bio_data_dir(bio);
+	int d = bio_data_dir(bio), s;
 	struct request *__rq;
 
-	__rq = elv_rb_find(&md->sort_list[1][d], bio_end_sector(bio));
-	if (__rq) {
-		BUG_ON(bio_end_sector(bio) != blk_rq_pos(__rq));
-		if (elv_bio_merge_ok(__rq, bio)) {
-			*req = __rq;
-			return ELEVATOR_FRONT_MERGE;
+	for (s = 0; s < 2; s++) {
+		__rq = elv_rb_find(&md->sort_list[s][d], bio_end_sector(bio));
+		if (__rq) {
+			if (bio_end_sector(bio) != blk_rq_pos(__rq))
+				return ELEVATOR_NO_MERGE;
+			if (elv_bio_merge_ok(__rq, bio)) {
+				*req = __rq;
+				return ELEVATOR_FRONT_MERGE;
+			}
 		}
 	}
 	return ELEVATOR_NO_MERGE;
@@ -181,7 +184,7 @@ static void mazq_add_request(struct request_queue *q, struct request *rq)
 		md->next_rq[s][d] = mazq_latter(rq);
 }
 
-static void mazq_remove_request(struct request_queue *q, struct request *rq)
+static void __maybe_unused mazq_remove_request(struct request_queue *q, struct request *rq)
 {
 	struct mazq_data *md = mazq_get_data(q);
 	rq_fifo_clear(rq);
@@ -405,12 +408,16 @@ static int mazq_dispatch_requests(struct request_queue *q, int force)
 static void mazq_completed_req(struct request_queue *q, struct request *rq)
 {
 	struct mazq_data *md = mazq_get_data(q);
+	u64 start_ns;
 
 	if (!rq_is_sync(rq) || op_is_flush(rq->cmd_flags) ||
 	    rq_data_dir(rq) == WRITE)
 		return;
+	start_ns = rq_start_time_ns(rq);
+	if (!start_ns)
+		return;
 	{
-		u64 lat = ktime_get_ns() - rq_start_time_ns(rq);
+		u64 lat = ktime_get_ns() - start_ns;
 		mazq_check_ema(md, lat);
 	}
 }
@@ -475,7 +482,7 @@ static ssize_t mazq_var_show(int var, char *page)
 	return snprintf(page, PAGE_SIZE, "%d\n", var);
 }
 
-static ssize_t mazq_var_store(int *var, const char *page, size_t count)
+static ssize_t __maybe_unused mazq_var_store(int *var, const char *page, size_t count)
 {
 	int ret = kstrtoint(page, 0, var);
 	return ret ? ret : count;

@@ -2780,7 +2780,7 @@ out:
 }
 
 #ifdef CONFIG_SECURITY
-static int proc_pid_attr_open(struct inode *inode, struct file *file)
+static int __maybe_unused proc_pid_attr_open(struct inode *inode, struct file *file)
 {
 	file->private_data = NULL;
 	__mem_open(inode, file, PTRACE_MODE_READ_FSCREDS);

@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <net/tcp.h>
 #include <linux/inet_diag.h>
+#include <linux/win_minmax.h>
 
 #define SWIFT_SCALE	8
 #define SWIFT_UNIT	(1 << SWIFT_SCALE)
@@ -52,7 +53,6 @@ struct swift {
 	u32	bw_est;
 	u32	bw_westwood;
 	u32	min_rtt_us;
-	u32	last_bw;
 
 	u16	state:3,
 		probe_idx:3,
@@ -74,10 +74,9 @@ struct swift {
 	u32	last_max_cwnd;
 	u16	cube_cnt;
 
-	u32	ww_win_start;
-	u32	ww_acked;
-	u32	ww_rtt;
-	u32	ww_rtt_min;
+	u32	next_rtt_delivered_ww;
+	u32	ww_rtt_cnt;
+	struct minmax bw_ww;
 
 	u32	lq_delivered;
 	u32	lq_lost;
@@ -122,11 +121,6 @@ static const u32 swift_probe_rtt_ms	= 200;
 /* Loss rate thresholds per adapt level */
 static const u32 swift_lq_up_thresh[]	= { 2, 5, 10, 20 };
 static const u32 swift_lq_down_thresh[]	= { 1, 3, 5, 10 };
-
-static u32 ww_filter(u32 prev, u32 sample)
-{
-	return prev ? ((7 * prev) + sample) >> 3 : sample;
-}
 
 static u32 bw_to_pkts(u32 bw)
 {
@@ -235,14 +229,12 @@ static void swift_init(struct sock *sk)
 	f->min_rtt_us = 0;
 	f->bw_est = 0;
 	f->bw_westwood = 0;
-	f->last_bw = 0;
 	f->epoch_start = 0;
 	f->last_max_cwnd = 0;
 	f->cube_cnt = 0;
-	f->ww_win_start = tcp_jiffies32;
-	f->ww_acked = 0;
-	f->ww_rtt = ~0U / 1000;
-	f->ww_rtt_min = ~0U / 1000;
+	f->next_rtt_delivered_ww = 0;
+	f->ww_rtt_cnt = 0;
+	minmax_reset(&f->bw_ww, f->ww_rtt_cnt, 0);
 	f->adapt_level = 1;
 	f->lq_delivered = 0;
 	f->lq_lost = 0;
@@ -253,29 +245,6 @@ static void swift_init(struct sock *sk)
 	f->ml_reward_acc = 0;
 	for (i = 0; i < 4; i++)
 		f->ml_arm_reward[i] = 0;
-}
-
-static void swift_westwood_update(struct swift *f, u32 delta_jiffies,
-				  u32 bytes, u32 rtt)
-{
-	u32 win = max_t(u32, rtt, SWIFT_RTT_MIN_US) << (1 + f->adapt_level +
-						 swift_arms[f->ml_arm].ww_shift);
-
-	f->ww_acked += bytes;
-	f->ww_rtt = rtt;
-	f->ww_rtt_min = min(f->ww_rtt_min, rtt);
-
-	if (delta_jiffies > max_t(u32, usecs_to_jiffies(rtt),
-				  usecs_to_jiffies(win))) {
-		u32 bw = (f->ww_acked * USEC_PER_SEC) /
-			 jiffies_to_usecs(delta_jiffies);
-		if (f->adapt_level >= 2 || swift_arms[f->ml_arm].ww_shift >= 3)
-			f->bw_westwood = ww_filter(f->bw_westwood, bw);
-		else
-			f->bw_westwood = bw;
-		f->ww_acked = 0;
-		f->ww_win_start = tcp_jiffies32;
-	}
 }
 
 static void swift_pkts_acked(struct sock *sk, const struct ack_sample *sample)
@@ -290,15 +259,8 @@ static void swift_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 	else if (sample->rtt_us < f->min_rtt_us)
 		f->min_rtt_us -= (f->min_rtt_us - sample->rtt_us) >> 2;
 
-	if (!f->has_seen_rtt) {
+	if (!f->has_seen_rtt)
 		f->has_seen_rtt = 1;
-		f->ww_rtt = sample->rtt_us;
-		f->ww_rtt_min = sample->rtt_us;
-	}
-
-	swift_westwood_update(f, tcp_jiffies32 - f->ww_win_start,
-			      sample->pkts_acked * tcp_sk(sk)->mss_cache,
-			      sample->rtt_us);
 }
 
 static u32 swift_cubic_cnt(struct swift *f, u32 cwnd)
@@ -337,8 +299,8 @@ static u32 swift_bw_ssthresh(struct sock *sk)
 	if (f->bw_est)
 		bw_bytes = max(bw_bytes, bw_to_pkts(f->bw_est) * tp->mss_cache);
 
-	if (bw_bytes && f->ww_rtt_min != ~0U / 1000)
-		return max_t(u32, (bw_bytes * f->ww_rtt_min) /
+	if (bw_bytes && f->min_rtt_us)
+		return max_t(u32, (bw_bytes * f->min_rtt_us) /
 			     USEC_PER_SEC / tp->mss_cache, 2);
 	return max(tp->snd_cwnd >> 1, 2U);
 }
@@ -382,6 +344,17 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 	bw = (u32)div64_u64((u64)rs->delivered * tp->mss_cache * USEC_PER_SEC,
 			    rs->interval_us);
 	bw <<= (SWIFT_BW_SCALE - 10);
+
+	/* Westwood-sub: windowed max filter over 10 RTTs */
+	{
+		u32 raw_bw = bw >> (SWIFT_BW_SCALE - 10);
+		if (before(rs->prior_delivered, f->next_rtt_delivered_ww)) {
+			f->next_rtt_delivered_ww = tp->delivered;
+			f->ww_rtt_cnt++;
+		}
+		minmax_running_max(&f->bw_ww, 10, f->ww_rtt_cnt, raw_bw);
+		f->bw_westwood = (u32)minmax_get(&f->bw_ww);
+	}
 
 	if (before(rs->prior_delivered, f->next_round_delivered)) {
 		f->next_round_delivered = tp->delivered;
@@ -453,7 +426,6 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 
 	case SWIFT_PROBE_BW:
 		if (round_start) {
-			f->last_bw = bw;
 			f->probe_idx = (f->probe_idx + 1) & (SWIFT_CYCLE_LEN - 1);
 		}
 		/* Scale the probe gain by arm boost */
@@ -548,12 +520,9 @@ static void swift_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 	switch (event) {
 	case CA_EVENT_TX_START:
 		f->idle_restart = 1;
-		f->ww_win_start = tcp_jiffies32;
-		f->ww_acked = 0;
 		break;
 	case CA_EVENT_LOSS:
 		tcp_sk(sk)->snd_ssthresh = swift_bw_ssthresh(sk);
-		f->ww_rtt_min = f->ww_rtt;
 		break;
 	case CA_EVENT_CWND_RESTART:
 		f->epoch_start = 0;
