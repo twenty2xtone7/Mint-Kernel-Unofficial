@@ -378,7 +378,7 @@ static int mazq_dispatch_requests(struct request_queue *q, int force)
 
 static void mazq_completed_req(struct request_queue *q, struct request *rq)
 {
-	struct mazq_data *md = mazq_get_data(q);
+	struct mazq_data *md __maybe_unused = mazq_get_data(q);
 
 	if (!rq_is_sync(rq) || op_is_flush(rq->cmd_flags) ||
 	    rq_data_dir(rq) == WRITE)
