@@ -3,9 +3,8 @@
  * Copyright (C) 2023 Sultan Alsawaf <sultan@kerneltoast.com>.
  */
 
-#include <linux/sched.h>
-#include <linux/cpuidle.h>
 #include "sched.h"
+#include <linux/cpuidle.h>
 
 static inline void lsub_positive(unsigned long *val, unsigned long dmin)
 {
