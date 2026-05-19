@@ -91,28 +91,28 @@ struct swift {
 
 /* Default arm profiles: [probe_boost, smooth_shift, ww_shift] */
 static const struct swift_arm swift_arms[4] = {
-	{ 1250, 2, 1 },	/* arm 0: Sprint - aggressive */
-	{ 1150, 3, 2 },	/* arm 1: Cruise - balanced */
-	{ 1100, 3, 3 },	/* arm 2: Endure - stable */
-	{ 1050, 4, 4 },	/* arm 3: Survive - ultra conservative */
+	{ 1350, 2, 1 },	/* arm 0: Sprint - aggressive */
+	{ 1200, 2, 2 },	/* arm 1: Cruise - balanced */
+	{ 1125, 3, 3 },	/* arm 2: Endure - stable */
+	{ 1075, 4, 4 },	/* arm 3: Survive - ultra conservative */
 };
 
 /* Base pacing gain tables (will be scaled by arm probe_boost) */
 static const u32 swift_pacing_gain_base[] = {
 	SWIFT_UNIT,			/* placeholder for scaled probe */
-	SWIFT_UNIT * 85 / 100,
-	SWIFT_UNIT, SWIFT_UNIT,
+	SWIFT_UNIT * 80 / 100,
+	SWIFT_UNIT * 105 / 100, SWIFT_UNIT,
 	SWIFT_UNIT, SWIFT_UNIT,
 	SWIFT_UNIT, SWIFT_UNIT,
 };
 
 #define SWIFT_CYCLE_LEN		8
 #define SWIFT_CYCLE_RAND	7
-#define SWIFT_ML_INTERVAL	8
+#define SWIFT_ML_INTERVAL	6
 
-static const u32 swift_high_gain	= SWIFT_UNIT * 2885 / 1000 + 1;
-static const u32 swift_drain_gain	= SWIFT_UNIT * 1000 / 2885;
-static const u32 swift_cwnd_gain	= SWIFT_UNIT * 2;
+static const u32 swift_high_gain	= SWIFT_UNIT * 3 + 1;
+static const u32 swift_drain_gain	= SWIFT_UNIT * 1000 / 3000;
+static const u32 swift_cwnd_gain	= SWIFT_UNIT * 3;
 
 static const u32 swift_min_tso_rate	= 1200000;
 static const u32 swift_min_rtt_win_sec	= 10;
@@ -239,9 +239,9 @@ static void swift_init(struct sock *sk)
 	f->lq_delivered = 0;
 	f->lq_lost = 0;
 
-	f->ml_arm = 1;
+	f->ml_arm = 0;
 	f->ml_epsilon = 20;
-	f->ml_best_arm = 1;
+	f->ml_best_arm = 0;
 	f->ml_reward_acc = 0;
 	for (i = 0; i < 4; i++)
 		f->ml_arm_reward[i] = 0;
@@ -405,7 +405,7 @@ static void swift_main(struct sock *sk, const struct rate_sample *rs)
 			else
 				f->full_bw_cnt = 0;
 			f->full_bw = max(f->full_bw, bw);
-			if (f->full_bw_cnt >= 3)
+			if (f->full_bw_cnt >= 5)
 				f->state = SWIFT_DRAIN;
 		}
 		if (!tcp_in_slow_start(tp))

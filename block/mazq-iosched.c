@@ -19,18 +19,18 @@
 enum { ASYNC, SYNC };
 
 /* ── Tunable defaults ── */
-static const int sync_read_expire    = 10;
-static const int sync_write_expire   = 25;
-static const int async_read_expire   = 25;
-static const int async_write_expire  = 50;
-static const int fifo_batch          = 6;
-static const int writes_starved      = 4;
-static const int sync_ratio          = 6;
-static const int batch_count         = 3;
-static const int thinktime_jiffs     = 2;
-static const int latency_target_ns   = 5000000;
+static const int sync_read_expire    = 5;
+static const int sync_write_expire   = 15;
+static const int async_read_expire   = 15;
+static const int async_write_expire  = 30;
+static const int fifo_batch          = 4;
+static const int writes_starved      = 6;
+static const int sync_ratio          = 8;
+static const int batch_count         = 4;
+static const int thinktime_jiffs     = 1;
+static const int latency_target_ns   = 3000000;
 static const int latency_samples_max = 4;
-static const int async_cost_limit    = 4;
+static const int async_cost_limit    = 8;
 
 struct mazq_data {
 	struct list_head fifo_list[2][2];
