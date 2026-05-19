@@ -215,8 +215,6 @@ static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
 {
 	bool sync;
 
-	pr_info_once("CASS scheduler active\n");
-
 	/* Don't balance on exec since we don't know what @p will look like */
 	if (sd_flag & SD_BALANCE_EXEC)
 		return prev_cpu;
@@ -236,3 +234,10 @@ static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
 	sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
 	return cass_best_cpu(p, prev_cpu, sync);
 }
+
+static int __init cass_init(void)
+{
+	pr_alert("CASS scheduler active\n");
+	return 0;
+}
+core_initcall(cass_init);
