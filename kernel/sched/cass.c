@@ -3,6 +3,40 @@
  * Copyright (C) 2023 Sultan Alsawaf <sultan@kerneltoast.com>.
  */
 
+#include <linux/sched.h>
+#include <linux/cpuidle.h>
+#include "sched.h"
+
+static inline void lsub_positive(unsigned long *val, unsigned long dmin)
+{
+	if (*val > dmin)
+		*val -= dmin;
+	else
+		*val = 0;
+}
+
+static inline bool available_idle_cpu(int cpu)
+{
+	return idle_cpu(cpu);
+}
+
+static inline bool sched_idle_cpu(int cpu)
+{
+	return false;
+}
+
+static inline unsigned long cass_task_util_est(struct task_struct *p)
+{
+#ifdef CONFIG_SCHED_WALT
+	if (likely(!walt_disabled && sysctl_sched_use_walt_task_util))
+		return (p->ravg.demand /
+			(walt_ravg_window >> SCHED_CAPACITY_SHIFT));
+#endif
+	return max(READ_ONCE(p->se.avg.util_avg),
+		   max(READ_ONCE(p->se.avg.util_est.ewma),
+		       READ_ONCE(p->se.avg.util_est.enqueued)));
+}
+
 /**
  * DOC: Capacity Aware Superset Scheduler (CASS) description
  *
@@ -101,7 +135,7 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync)
 	int cidx = 0, cpu;
 
 	/* Get the utilization for this task */
-	p_util = clamp(task_util_est(p),
+	p_util = clamp(cass_task_util_est(p),
 		       uclamp_eff_value(p, UCLAMP_MIN),
 		       uclamp_eff_value(p, UCLAMP_MAX));
 
@@ -180,7 +214,8 @@ static int cass_best_cpu(struct task_struct *p, int prev_cpu, bool sync)
 }
 
 static int cass_select_task_rq_fair(struct task_struct *p, int prev_cpu,
-				    int sd_flag, int wake_flags)
+				    int sd_flag, int wake_flags,
+				    int sibling_count_hint)
 {
 	bool sync;
 

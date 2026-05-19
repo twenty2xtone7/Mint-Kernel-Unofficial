@@ -124,7 +124,7 @@ static inline int skb_mac_offset(const struct sk_buff *skb)
 #endif
 
 
-#if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 0, 0) > LINUX_VERSION_CODE
 static void *kvzalloc_compat(size_t sz, gfp_t flags)
 {
 	void *ptr = kzalloc(sz, flags);
