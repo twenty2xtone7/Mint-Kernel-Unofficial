@@ -47,6 +47,7 @@ struct mazq_data {
 	int async_cost;
 
 	unsigned long last_dispatch;
+	int last_dispatch_dir;
 	int think_jiffs;
 	int think_seen;
 
@@ -270,8 +271,7 @@ static struct request *mazq_choose_sequential(struct mazq_data *md, int dir)
 	else if (md->next_rq[ASYNC][dir])
 		rq = md->next_rq[ASYNC][dir];
 
-	if (rq && rq_fifo_time(rq) &&
-	    time_before(jiffies, (unsigned long)rq->fifo_time + HZ / 10))
+	if (rq)
 		return rq;
 
 	return NULL;
@@ -409,9 +409,10 @@ static void mazq_completed_req(struct request_queue *q, struct request *rq)
 	if (!rq_is_sync(rq) || op_is_flush(rq->cmd_flags) ||
 	    rq_data_dir(rq) == WRITE)
 		return;
-
-	u64 lat = ktime_get_ns() - rq_start_time_ns(rq);
-	mazq_check_ema(md, lat);
+	{
+		u64 lat = ktime_get_ns() - rq_start_time_ns(rq);
+		mazq_check_ema(md, lat);
+	}
 }
 
 static void __maybe_unused mazq_put_request(struct request *rq)
