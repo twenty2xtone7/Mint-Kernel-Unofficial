@@ -28,8 +28,6 @@ static const int writes_starved      = 6;
 static const int sync_ratio          = 8;
 static const int batch_count         = 4;
 static const int thinktime_jiffs     = 1;
-static const int latency_target_ns   = 3000000;
-static const int latency_samples_max = 4;
 static const int async_cost_limit    = 8;
 
 struct mazq_data {
@@ -50,13 +48,6 @@ struct mazq_data {
 	int last_dispatch_dir;
 	int think_jiffs;
 	int think_seen;
-
-	u64 read_latency_ema;
-	u64 read_latency_max;
-	int latency_samples;
-	unsigned int tight_mode;
-	int latency_target;
-	int latency_window;
 };
 
 static inline struct mazq_data *mazq_get_data(struct request_queue *q)
@@ -99,26 +90,6 @@ static void mazq_check_thinktime(struct mazq_data *md)
 		md->think_seen = 1;
 		md->starved = 0;
 		md->batched = md->fifo_batch;
-	}
-}
-
-static void mazq_check_ema(struct mazq_data *md, u64 lat_ns)
-{
-	md->read_latency_max = max(md->read_latency_max, lat_ns);
-
-	if (md->read_latency_ema)
-		md->read_latency_ema += (lat_ns - md->read_latency_ema) >> 3;
-	else
-		md->read_latency_ema = lat_ns;
-
-	md->latency_samples++;
-	if (md->latency_samples >= md->latency_window) {
-		md->latency_samples = 0;
-		if (md->read_latency_max > md->latency_target)
-			md->tight_mode = 1;
-		else if (md->read_latency_ema < (md->latency_target >> 1))
-			md->tight_mode = 0;
-		md->read_latency_max = 0;
 	}
 }
 
@@ -363,8 +334,8 @@ static int mazq_dispatch_requests(struct request_queue *q, int force)
 
 	mazq_check_thinktime(md);
 
-	/* When tight_mode is active, check expiry every batch */
-	if (md->tight_mode) {
+	/* Check expired on every dispatch cycle */
+	{
 		int flushed = mazq_flush_expired(md, q);
 		if (flushed) return flushed;
 	}
@@ -379,7 +350,7 @@ static int mazq_dispatch_requests(struct request_queue *q, int force)
 	}
 
 	/* Sequential hint: dispatch next_rq if within fifo_batch */
-	if (!md->tight_mode && md->batched < md->fifo_batch / 2) {
+	if (md->batched < md->fifo_batch / 2) {
 		int d = (md->starved >= md->writes_starved) ? WRITE : READ;
 		rq = mazq_choose_sequential(md, d);
 		if (rq) {
@@ -408,18 +379,10 @@ static int mazq_dispatch_requests(struct request_queue *q, int force)
 static void mazq_completed_req(struct request_queue *q, struct request *rq)
 {
 	struct mazq_data *md = mazq_get_data(q);
-	u64 start_ns;
 
 	if (!rq_is_sync(rq) || op_is_flush(rq->cmd_flags) ||
 	    rq_data_dir(rq) == WRITE)
 		return;
-	start_ns = rq_start_time_ns(rq);
-	if (!start_ns)
-		return;
-	{
-		u64 lat = ktime_get_ns() - start_ns;
-		mazq_check_ema(md, lat);
-	}
 }
 
 static void __maybe_unused mazq_put_request(struct request *rq)
@@ -461,8 +424,6 @@ static int mazq_init_queue(struct request_queue *q, struct elevator_type *e)
 	md->sync_ratio       = sync_ratio;
 	md->batch_count      = batch_count;
 	md->think_jiffs      = thinktime_jiffs;
-	md->latency_target   = latency_target_ns;
-	md->latency_window   = latency_samples_max;
 
 	spin_lock_irq(q->queue_lock);
 	q->elevator = eq;
@@ -488,24 +449,6 @@ static ssize_t __maybe_unused mazq_var_store(int *var, const char *page, size_t 
 	return ret ? ret : count;
 }
 
-static ssize_t mazq_ema_show(struct elevator_queue *e, char *page)
-{
-	struct mazq_data *md = e->elevator_data;
-	return snprintf(page, PAGE_SIZE, "%llu\n", md->read_latency_ema);
-}
-
-static ssize_t mazq_tight_show(struct elevator_queue *e, char *page)
-{
-	struct mazq_data *md = e->elevator_data;
-	return snprintf(page, PAGE_SIZE, "%u\n", md->tight_mode);
-}
-
-static ssize_t mazq_peak_show(struct elevator_queue *e, char *page)
-{
-	struct mazq_data *md = e->elevator_data;
-	return snprintf(page, PAGE_SIZE, "%llu\n", md->read_latency_max);
-}
-
 #define SHOW_FUNC(__FUNC, __VAR) \
 static ssize_t __FUNC(struct elevator_queue *e, char *page) \
 { \
@@ -520,9 +463,7 @@ SHOW_FUNC(mazq_fifo_batch_show, md->fifo_batch);
 SHOW_FUNC(mazq_writes_starved_show, md->writes_starved);
 SHOW_FUNC(mazq_sync_ratio_show, md->sync_ratio);
 SHOW_FUNC(mazq_batch_count_show, md->batch_count);
-SHOW_FUNC(mazq_latency_target_show, md->latency_target);
 SHOW_FUNC(mazq_thinktime_show, md->think_jiffs);
-SHOW_FUNC(mazq_latency_window_show, md->latency_window);
 #undef SHOW_FUNC
 
 #define STORE_FUNC(__FUNC, __PTR, MIN, MAX) \
@@ -545,9 +486,7 @@ STORE_FUNC(mazq_fifo_batch_store, &md->fifo_batch, 1, 256);
 STORE_FUNC(mazq_writes_starved_store, &md->writes_starved, 1, 100);
 STORE_FUNC(mazq_sync_ratio_store, &md->sync_ratio, 1, 128);
 STORE_FUNC(mazq_batch_count_store, &md->batch_count, 1, 32);
-STORE_FUNC(mazq_latency_target_store, &md->latency_target, 100000, 100000000);
 STORE_FUNC(mazq_thinktime_store, &md->think_jiffs, 1, 100);
-STORE_FUNC(mazq_latency_window_store, &md->latency_window, 1, 64);
 #undef STORE_FUNC
 
 #define MAZQ_ATTR(name) \
@@ -563,12 +502,7 @@ static struct elv_fs_entry mazq_attrs[] = {
 	MAZQ_ATTR(writes_starved),
 	MAZQ_ATTR(sync_ratio),
 	MAZQ_ATTR(batch_count),
-	MAZQ_ATTR(latency_target),
 	MAZQ_ATTR(thinktime),
-	MAZQ_ATTR(latency_window),
-	__ATTR(latency_ema, S_IRUGO, mazq_ema_show, NULL),
-	__ATTR(tight_mode, S_IRUGO, mazq_tight_show, NULL),
-	__ATTR(peak_latency, S_IRUGO, mazq_peak_show, NULL),
 	__ATTR_NULL
 };
 
