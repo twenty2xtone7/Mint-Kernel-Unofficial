@@ -46,10 +46,6 @@
 
 #include <linux/prefer_silver.h>
 
-#ifdef CONFIG_SMP
-static inline bool task_fits_max(struct task_struct *p, int cpu);
-#endif /* CONFIG_SMP */
-
 #ifdef CONFIG_SCHED_WALT
 static void __maybe_unused walt_fixup_sched_stats_fair(struct rq *rq, struct task_struct *p,
 					u16 updated_demand_scaled,
@@ -85,10 +81,6 @@ walt_dec_cfs_rq_stats(struct cfs_rq *cfs_rq, struct task_struct *p) {}
 #include "walt.h"
 
 #include <linux/prefer_silver.h>
-
-#ifdef CONFIG_SMP
-static inline bool task_fits_max(struct task_struct *p, int cpu);
-#endif /* CONFIG_SMP */
 
 #ifdef CONFIG_SCHED_WALT
 static void walt_fixup_sched_stats_fair(struct rq *rq, struct task_struct *p,

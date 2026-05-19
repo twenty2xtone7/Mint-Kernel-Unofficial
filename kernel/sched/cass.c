@@ -3,9 +3,6 @@
  * Copyright (C) 2023 Sultan Alsawaf <sultan@kerneltoast.com>.
  */
 
-#include "sched.h"
-#include <linux/cpuidle.h>
-
 static inline void lsub_positive(unsigned long *val, unsigned long dmin)
 {
 	if (*val > dmin)
@@ -31,9 +28,9 @@ static inline unsigned long cass_task_util_est(struct task_struct *p)
 		return (p->ravg.demand /
 			(walt_ravg_window >> SCHED_CAPACITY_SHIFT));
 #endif
-	return max(READ_ONCE(p->se.avg.util_avg),
-		   max(READ_ONCE(p->se.avg.util_est.ewma),
-		       READ_ONCE(p->se.avg.util_est.enqueued)));
+	return max_t(unsigned long, READ_ONCE(p->se.avg.util_avg),
+		     max_t(unsigned long, READ_ONCE(p->se.avg.util_est.ewma),
+			   READ_ONCE(p->se.avg.util_est.enqueued)));
 }
 
 /**

@@ -73,7 +73,7 @@ struct sysbusy_param {
 
 #define TICK_SEC    MS_TO_JIFFIES(1000)
 #define BUSY_MONITOR_INTERVAL    MS_TO_JIFFIES(100)
-static struct sysbusy_param sysbusy_params[] = {
+static __maybe_unused struct sysbusy_param sysbusy_params[] = {
     {
         /* SYSBUSY_STATE0 (sysbusy inactivation) */
         .monitor_interval   = MS_TO_JIFFIES(4),
