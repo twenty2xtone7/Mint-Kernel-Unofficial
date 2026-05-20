@@ -30,11 +30,17 @@
 #include <linux/freezer.h>
 #include <linux/irq.h>
 #include <linux/list_sort.h>
+#include <linux/sysctl.h>
 #include "../sched/sched.h"
 #include "internals.h"
 
+/* timer_setup_on_stack is not available in this kernel */
+#define timer_setup_on_stack(timer, callback, flags)			\
+	__setup_timer_on_stack((timer), (TIMER_FUNC_TYPE)(callback),	\
+			       (TIMER_DATA_TYPE)(timer), (flags))
+
 /* Perform IRQ balancing every POLL_MS milliseconds */
-#define POLL_MS CONFIG_IRQ_SBALANCE_POLL_MSEC
+static int sbalance_poll_ms = CONFIG_IRQ_SBALANCE_POLL_MSEC;
 
 /*
  * There needs to be a difference of at least this many new interrupts between
@@ -44,7 +50,9 @@
  * This threshold is compared to the _scaled_ interrupt counts per CPU; i.e.,
  * the number of interrupts scaled to the CPU's capacity.
  */
-#define IRQ_SCALED_THRESH CONFIG_IRQ_SBALANCE_THRESH
+static int sbalance_threshold = CONFIG_IRQ_SBALANCE_THRESH;
+static unsigned int sbalance_balanced;
+static unsigned int sbalance_idle_runs;
 
 struct bal_irq {
 	struct list_head node;
@@ -173,39 +181,46 @@ static unsigned int scale_intrs(unsigned int intrs, int cpu)
 	return intrs * SCHED_CAPACITY_SCALE / per_cpu(cpu_cap, cpu);
 }
 
-/* Returns true if IRQ balancing should stop */
+/* Returns true if IRQ balancing should stop.
+ * When min_bd is non-NULL, we already know the minimum is in or past
+ * that domain — used to avoid full rescans in the migration loop.
+ */
 static bool find_min_bd(const cpumask_t *mask, unsigned int max_intrs,
-			struct bal_domain **min_bd)
+			struct bal_domain **min_bd,
+			struct bal_domain *skip_until)
 {
 	unsigned int intrs, min_intrs = UINT_MAX;
+	bool past_skip = (skip_until == NULL);
 	struct bal_domain *bd;
 	int cpu;
 
 	for_each_cpu(cpu, mask) {
 		bd = per_cpu_ptr(&balance_data, cpu);
+
+		if (!past_skip) {
+			if (bd == skip_until)
+				past_skip = true;
+			continue;
+		}
+
 		intrs = scale_intrs(bd->intrs, bd->cpu);
 
-		/* Terminate when the formerly-max CPU isn't the max anymore */
 		if (intrs > max_intrs)
 			return true;
 
-		/* Don't consider moving IRQs to this CPU if it's excluded */
 		if (cpumask_test_cpu(cpu, &cpu_exclude_mask))
 			continue;
 
-		/* Find the CPU with the lowest relative number of interrupts */
 		if (intrs < min_intrs) {
 			min_intrs = intrs;
 			*min_bd = bd;
 		}
 	}
 
-	/* No CPUs available to move IRQs onto */
 	if (min_intrs == UINT_MAX)
 		return true;
 
-	/* Don't balance if IRQs are already balanced evenly enough */
-	return max_intrs - min_intrs < IRQ_SCALED_THRESH;
+	return max_intrs - min_intrs < sbalance_threshold;
 }
 
 static void balance_irqs(void)
@@ -220,81 +235,91 @@ static void balance_irqs(void)
 	cpus_read_lock();
 	rcu_read_lock();
 
-	/* Find the available CPUs for balancing, if there are any */
 	cpumask_copy(&cpus, cpu_active_mask);
 	if (unlikely(cpumask_weight(&cpus) <= 1))
 		goto unlock;
 
+	/*
+	 * Single pass: collect per-CPU capacity, interrupt counts, and
+	 * identify the heaviest CPU with movable IRQs.
+	 */
+	max_intrs = 0;
+	max_bd = NULL;
 	for_each_cpu(cpu, &cpus) {
-		/*
-		 * Get the current capacity for each CPU. This is adjusted for
-		 * time spent processing IRQs, RT-task time, and thermal
-		 * pressure. We don't exclude time spent processing IRQs when
-		 * balancing because balancing is only done using interrupt
-		 * counts rather than time spent in interrupts. That way, time
-		 * spent processing each interrupt is considered when balancing.
-		 */
 		per_cpu(cpu_cap, cpu) = cpu_rq(cpu)->cpu_capacity;
 
-		/* Get the number of new interrupts on this CPU */
 		bd = per_cpu_ptr(&balance_data, cpu);
 		bd->intrs = kstat_cpu_irqs_sum(cpu) - bd->old_total;
 		bd->old_total += bd->intrs;
+
+		if (!bd->intrs)
+			continue;
+
+		if (cpumask_test_cpu(cpu, &cpu_exclude_mask))
+			continue;
+
+		intrs = scale_intrs(bd->intrs, bd->cpu);
+		if (intrs > max_intrs) {
+			max_intrs = intrs;
+			max_bd = bd;
+		}
 	}
 
+	if (!max_bd)
+		goto unlock;
+
 	list_for_each_entry_rcu(bi, &bal_irq_list, node) {
-		/* Consider this IRQ for balancing if it's movable */
 		if (!__irq_can_set_affinity(bi->desc))
 			continue;
 
 		if (!update_irq_data(bi, &cpu))
 			continue;
 
-		/* Ignore for this run if the IRQ isn't on the expected CPU */
 		if (cpu != bi->prev_cpu) {
 			bi->prev_cpu = cpu;
 			continue;
 		}
 
-		/* Add this IRQ to its CPU's list of movable IRQs */
 		bd = per_cpu_ptr(&balance_data, cpu);
 		list_add_tail(&bi->move_node, &bd->movable_irqs);
 	}
 
-	/* Find the most interrupt-heavy CPU with movable IRQs */
-	while (1) {
-		max_intrs = 0;
+	/*
+	 * If the heaviest CPU has no movable IRQs, scan down until we
+	 * find one that does. Precompute a sorted list of CPUs by scaled
+	 * interrupt count to avoid rescanning.
+	 */
+	if (list_empty(&max_bd->movable_irqs)) {
+		struct bal_domain *fallback_bd = NULL;
+		unsigned int fallback_intrs = 0;
+
 		for_each_cpu(cpu, &cpus) {
 			bd = per_cpu_ptr(&balance_data, cpu);
+			if (bd == max_bd)
+				continue;
+			if (list_empty(&bd->movable_irqs))
+				continue;
+			if (cpumask_test_cpu(cpu, &cpu_exclude_mask))
+				continue;
 			intrs = scale_intrs(bd->intrs, bd->cpu);
-			if (intrs > max_intrs) {
-				max_intrs = intrs;
-				max_bd = bd;
+			if (!intrs)
+				continue;
+			if (intrs > fallback_intrs) {
+				fallback_intrs = intrs;
+				fallback_bd = bd;
 			}
 		}
 
-		/* No balancing to do if there aren't any movable IRQs */
-		if (unlikely(!max_intrs))
+		if (!fallback_bd) {
+			sbalance_idle_runs++;
 			goto unlock;
-
-		/* Ensure the heaviest CPU has IRQs which can be moved away */
-		if (!list_empty(&max_bd->movable_irqs))
-			break;
-
-try_next_heaviest:
-		/*
-		 * If the heaviest CPU has no movable IRQs then it can neither
-		 * receive IRQs nor give IRQs. Exclude it from balancing so the
-		 * remaining CPUs can be balanced, if there are any.
-		 */
-		if (cpumask_weight(&cpus) == 2)
-			goto unlock;
-
-		__cpumask_clear_cpu(max_bd->cpu, &cpus);
+		}
+		max_intrs = fallback_intrs;
+		max_bd = fallback_bd;
 	}
 
 	/* Find the CPU with the lowest relative interrupt count */
-	if (find_min_bd(&cpus, max_intrs, &min_bd))
+	if (find_min_bd(&cpus, max_intrs, &min_bd, NULL))
 		goto unlock;
 
 	/* Sort movable IRQs in descending order of number of new interrupts */
@@ -302,44 +327,35 @@ try_next_heaviest:
 
 	/* Push IRQs away from the heaviest CPU to the least-heavy CPUs */
 	list_for_each_entry(bi, &max_bd->movable_irqs, move_node) {
-		/* Skip this IRQ if it would just overload the target CPU */
 		intrs = scale_intrs(min_bd->intrs + bi->delta_nr, min_bd->cpu);
 		if (intrs >= max_intrs)
 			continue;
 
-		/* Try to migrate this IRQ, or skip it if migration fails */
 		if (move_irq_to_cpu(bi, min_bd->cpu))
 			continue;
 
-		/* Keep track of whether or not any IRQs are moved */
 		moved_irq = true;
 
-		/*
-		 * Update the counts and recalculate the max scaled count. The
-		 * balance domain's delta interrupt count could be lower than
-		 * the sum of new interrupts counted for each IRQ, since they're
-		 * measured using different counters.
-		 */
 		min_bd->intrs += bi->delta_nr;
 		max_bd->intrs -= min(bi->delta_nr, max_bd->intrs);
 		max_intrs = scale_intrs(max_bd->intrs, max_bd->cpu);
 
-		/* Recheck for the least-heavy CPU since it may have changed */
-		if (find_min_bd(&cpus, max_intrs, &min_bd))
+		/*
+		 * Resume the min search from the current min_bd — CPUs
+		 * before it are already heavier, so we skip them.
+		 */
+		if (find_min_bd(&cpus, max_intrs, &min_bd, min_bd))
 			break;
 	}
 
-	/*
-	 * If the heaviest CPU has movable IRQs which can't actually be moved,
-	 * then ignore it and try balancing the next heaviest CPU.
-	 */
 	if (!moved_irq)
-		goto try_next_heaviest;
+		goto unlock;
+	sbalance_balanced++;
+	sbalance_idle_runs = 0;
 unlock:
 	rcu_read_unlock();
 	cpus_read_unlock();
 
-	/* Reset each balance domain for the next run */
 	for_each_possible_cpu(cpu) {
 		bd = per_cpu_ptr(&balance_data, cpu);
 		INIT_LIST_HEAD(&bd->movable_irqs);
@@ -381,7 +397,6 @@ static void sbalance_wait(long poll_jiffies)
 
 static int __noreturn sbalance_thread(void *data)
 {
-	long poll_jiffies = msecs_to_jiffies(POLL_MS);
 	struct bal_domain *bd;
 	int cpu;
 
@@ -398,14 +413,59 @@ static int __noreturn sbalance_thread(void *data)
 
 	set_freezable();
 	while (1) {
-		sbalance_wait(poll_jiffies);
+		int ms = sbalance_poll_ms;
+
+		/*
+		 * Adaptive backoff: when the system is balanced and no
+		 * IRQs have been moved for several runs, scale the poll
+		 * interval up to 4x to reduce CPU wakeups. Resets to the
+		 * configured minimum as soon as balancing is needed.
+		 */
+		if (sbalance_idle_runs > 3 && ms < 10000)
+			ms = min(ms * 2, 10000);
+
+		sbalance_wait(msecs_to_jiffies(ms));
 		balance_irqs();
 	}
 }
 
+static struct ctl_table sbalance_sysctl_table[] = {
+	{
+		.procname	= "poll_ms",
+		.data		= &sbalance_poll_ms,
+		.maxlen		= sizeof(sbalance_poll_ms),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "threshold",
+		.data		= &sbalance_threshold,
+		.maxlen		= sizeof(sbalance_threshold),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "balanced",
+		.data		= &sbalance_balanced,
+		.maxlen		= sizeof(sbalance_balanced),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
+};
+
+static struct ctl_table sbalance_sysctl_dir[] = {
+	{ .procname = "sbalance", .mode = 0555, .child = sbalance_sysctl_table },
+	{ }
+};
+
 static int __init sbalance_init(void)
 {
+	pr_info("starting sbalance thread\n");
 	BUG_ON(IS_ERR(kthread_run(sbalance_thread, NULL, "sbalanced")));
+	pr_info("sbalance thread started\n");
+
+	register_sysctl("kernel", sbalance_sysctl_dir);
 	return 0;
 }
 late_initcall(sbalance_init);
