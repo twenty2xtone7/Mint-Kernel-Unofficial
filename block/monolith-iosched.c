@@ -355,7 +355,7 @@ static void md_store(int *v, const char *p) { *v = simple_strtol((char *)p, NULL
 #define S1(name, field, conv) \
 static ssize_t md_##name##_show(struct elevator_queue *e, char *p) { \
 	struct md_data *m = e->elevator_data; int d = field; \
-	if (conv) d = jiffies_to_msecs(d); return md_show(d, p); }
+	if (conv) { d = jiffies_to_msecs(d); } return md_show(d, p); }
 #define S2(name, ptr, mn, mx, conv) \
 static ssize_t md_##name##_store(struct elevator_queue *e, const char *pg, size_t c) { \
 	struct md_data *m = e->elevator_data; int d; md_store(&d, pg); \

@@ -18,7 +18,7 @@ enum zen_data_dir { ASYNC, SYNC };
 
 static const int sync_expire  = HZ / 2;    /* max time before a sync is submitted. */
 static const int async_expire = 5 * HZ;    /* ditto for async, these limits are SOFT! */
-static const int fifo_batch = 1;
+static const int zen_fifo_batch = 1;
 
 struct zen_data {
 	/* Runtime Data */
@@ -176,7 +176,7 @@ static int zen_init_queue(struct request_queue *q, struct elevator_type *e)
 	INIT_LIST_HEAD(&zdata->fifo_list[ASYNC]);
 	zdata->fifo_expire[SYNC] = sync_expire;
 	zdata->fifo_expire[ASYNC] = async_expire;
-	zdata->fifo_batch = fifo_batch;
+	zdata->fifo_batch = zen_fifo_batch;
 
 	spin_lock_irq(q->queue_lock);
 	q->elevator = eq;
@@ -212,9 +212,10 @@ static ssize_t __FUNC(struct elevator_queue *e, char *page) \
 { \
 	struct zen_data *zdata = e->elevator_data; \
 	int __data = __VAR; \
-	if (__CONV) \
+	if (__CONV) { \
 		__data = jiffies_to_msecs(__data); \
-		return zen_var_show(__data, (page)); \
+	} \
+	return zen_var_show(__data, (page)); \
 }
 SHOW_FUNCTION(zen_sync_expire_show, zdata->fifo_expire[SYNC], 1);
 SHOW_FUNCTION(zen_async_expire_show, zdata->fifo_expire[ASYNC], 1);
