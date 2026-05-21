@@ -1,4 +1,3 @@
-#include <linux/task_blocklist.h>
 #include <linux/cgroup.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
@@ -587,26 +586,6 @@ static int prefer_high_cap_write(struct cgroup_subsys_state *css,
 }
 
 #ifdef CONFIG_STUNE_ASSIST
-#ifdef CONFIG_SCHED_WALT
-static int sched_boost_override_write_wrapper(struct cgroup_subsys_state *css,
-					      struct cftype *cft, u64 override)
-{
-	if (task_is_blocklisted(current))
-		return 0;
-
-	return sched_boost_override_write(css, cft, override);
-}
-
-static int sched_colocate_write_wrapper(struct cgroup_subsys_state *css,
-					struct cftype *cft, u64 colocate)
-{
-	if (task_is_blocklisted(current))
-		return 0;
-
-	return sched_colocate_write(css, cft, colocate);
-}
-#endif
-
 static int boost_write_wrapper(struct cgroup_subsys_state *css,
 			       struct cftype *cft, s64 boost)
 {
@@ -614,27 +593,6 @@ static int boost_write_wrapper(struct cgroup_subsys_state *css,
 		return 0;
 
 	return boost_write(css, cft, boost);
-}
-
-static int prefer_idle_write_wrapper(struct cgroup_subsys_state *css,
-				     struct cftype *cft, u64 prefer_idle)
-{
-	if (task_is_blocklisted(current))
-		return 0;
-
-	return prefer_idle_write(css, cft, prefer_idle);
-}
-
-static u64 sched_boost_override_read(struct cgroup_subsys_state *css,
-				     struct cftype *cft)
-{
-	return 0;
-}
-
-static u64 sched_colocate_read(struct cgroup_subsys_state *css,
-			       struct cftype *cft)
-{
-	return 0;
 }
 #endif
 
@@ -749,16 +707,6 @@ static struct cftype files[] = {
 		.name = "freqboost",
 		.read_s64 = boost_read,
 		.write_s64 = boost_write,
-	},
-	{
-		.name = "sched_boost_no_override",
-		.read_u64 = sched_boost_override_read,
-		.write_u64 = sched_boost_override_write_wrapper,
-	},
-	{
-		.name = "colocate",
-		.read_u64 = sched_colocate_read,
-		.write_u64 = sched_colocate_write_wrapper,
 	},
 #else
 	{
@@ -881,50 +829,10 @@ schedtune_boostgroup_init(struct schedtune *st)
 	return 0;
 }
 
-#ifdef CONFIG_STUNE_ASSIST
-struct st_data {
-	char *name;
-	int boost;
-	bool prefer_idle;
-	bool colocate;
-	bool no_override;
-};
-
-static void write_default_values(struct cgroup_subsys_state *css)
-{
-	static struct st_data st_targets[] = {
-		{ "audio-app",	0, 0, 0, 0 },
-		{ "background",	0, 0, 0, 0 },
-		{ "foreground",	0, 1, 0, 1 },
-		{ "rt",		0, 0, 0, 0 },
-		{ "top-app",	1, 1, 0, 1 },
-	};
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(st_targets); i++) {
-		struct st_data tgt = st_targets[i];
-
-		if (!strcmp(css->cgroup->kn->name, tgt.name)) {
-			pr_info("stune_assist: setting values for %s: boost=%d prefer_idle=%d colocate=%d no_override=%d\n",
-				tgt.name, tgt.boost, tgt.prefer_idle,
-				tgt.colocate, tgt.no_override);
-
-			boost_write(css, NULL, tgt.boost);
-			prefer_idle_write(css, NULL, tgt.prefer_idle);
-#ifdef CONFIG_SCHED_WALT
-			sched_colocate_write(css, NULL, tgt.colocate);
-			sched_boost_override_write(css, NULL, tgt.no_override);
-#endif
-		}
-	}
-}
-#endif
-
 #ifdef CONFIG_SCHED_EMS
 struct stune_param {
 	char *name;
 	s64 boost;
-	bool prefer_idle;
 
 	u64 ems_heavy_boost;
 	u64 ems_busy_boost;
@@ -941,26 +849,25 @@ schedtune_set_default_values(struct cgroup_subsys_state *css)
 {
 	int i;
 	static struct stune_param tgts[] = {
-		/* cgroup           b  pi hb bb sp oe nt te gg */
-		{"top-app",	        1, 1, 3, 5, 0, 1, 25, 1, 1 },
-		{"foreground",	    0, 1, 1, 3, 0, 1, 25, 0, 0 },
-		{"background",	    0, 0, 0, 1, 1, 0,  5, 0, 0 },
-		{"rt",		        3, 0, 5, 7, 2, 0,  5, 0, 0 },
-		{"camera-daemon",	3, 0, 7, 7, 3, 0, 25, 0, 0 },
-		{"nnapi-hal",	    3, 0, 5, 7, 3, 0, 25, 0, 0 },
-		{"hot",	            0, 0, 0, 0, 0, 0,  5, 0, 0 },
+		/* cgroup            l-b h-b b-b e-p e-o  e-n e-t e-g */
+		{"top-app",	           1,  3,  5,  0,  1,  25,  1,  1 },
+		{"foreground",	       0,  1,  3,  0,  1,  25,  0,  0 },
+		{"background",	       0,  0,  1,  1,  0,   5,  0,  0 },
+		{"rt",		           3,  5,  7,  2,  0,   5,  0,  0 },
+		{"camera-daemon",	   3,  7,  7,  3,  0,  25,  0,  0 },
+		{"nnapi-hal",	       3,  5,  7,  3,  0,  25,  0,  0 },
+		{"hot",	               0,  0,  0,  0,  0,   5,  0,  0 },
 	};
 
 	for (i = 0; i < ARRAY_SIZE(tgts); i++) {
 		struct stune_param tgt = tgts[i];
 
 		if (!strcmp(css->cgroup->kn->name, tgt.name)) {
-			pr_info("stune_assist: setting values for %s: boost=%d prefer_idle=%d heavy_boost=%d busy_boost=%d ems_sched_policy=%d ems_ontime_enabled=%d ems_ntu_ratio=%d ems_tex_enabled=%d ems_global_task_boost=%d\n",
-				tgt.name, tgt.boost, tgt.prefer_idle, tgt.ems_heavy_boost, tgt.ems_busy_boost, tgt.ems_sched_policy, tgt.ems_ontime_enabled,
+			pr_info("stune_assist: setting values for %s: boost=%d heavy_boost=%d busy_boost=%d ems_sched_policy=%d ems_ontime_enabled=%d ems_ntu_ratio=%d ems_tex_enabled=%d ems_global_task_boost=%d\n",
+				tgt.name, tgt.boost, tgt.ems_heavy_boost, tgt.ems_busy_boost, tgt.ems_sched_policy, tgt.ems_ontime_enabled,
 				tgt.ems_ntu_ratio, tgt.ems_tex_enabled, tgt.ems_global_task_boost);
 
 			boost_write(css, NULL, tgt.boost);
-			prefer_idle_write(css, NULL, tgt.prefer_idle);
 			heavy_boost_write(css, NULL, tgt.ems_heavy_boost);
 			busy_boost_write(css, NULL, tgt.ems_busy_boost);
 
