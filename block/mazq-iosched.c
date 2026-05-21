@@ -127,6 +127,8 @@ static void mazq_merged_request(struct request_queue *q,
 static void mazq_merged_requests(struct request_queue *q,
 				 struct request *rq, struct request *next)
 {
+	struct mazq_data *md = mazq_get_data(q);
+
 	if (!list_empty(&rq->queuelist) && !list_empty(&next->queuelist)) {
 		if (time_before((unsigned long)next->fifo_time,
 				(unsigned long)rq->fifo_time)) {
@@ -135,6 +137,7 @@ static void mazq_merged_requests(struct request_queue *q,
 		}
 	}
 	rq_fifo_clear(next);
+	mazq_del_rq_rb(md, next);
 }
 
 static void mazq_add_request(struct request_queue *q, struct request *rq)
