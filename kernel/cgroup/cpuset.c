@@ -1719,10 +1719,7 @@ static ssize_t cpuset_write_resmask(struct kernfs_open_file *of,
 	struct cpuset *trialcs;
 	int retval = -ENODEV;
 
-#ifndef CONFIG_CPUSETS_ASSIST
-	/* Don't call strstrip here because buf is read-only */
 	buf = strstrip(buf);
-#endif
 
 	/*
 	 * CPU or memory hotunplug may leave @cs w/o any execution
@@ -1780,26 +1777,6 @@ out_unlock:
 	css_put(&cs->css);
 	flush_workqueue(cpuset_migrate_mm_wq);
 	return retval ?: nbytes;
-}
-
-static ssize_t cpuset_write_resmask_wrapper(struct kernfs_open_file *of,
-					 char *buf, size_t nbytes, loff_t off)
-{
-	if (task_is_blocklisted(current)) {
-		for (i = 0; i < ARRAY_SIZE(cs_targets); i++) {
-			struct cs_target tgt = cs_targets[i];
-
-			cgroup_name(cs->css.cgroup, name_buf, sizeof(name_buf));
-			if (!strcmp(name_buf, tgt.name))
-				return cpuset_write_resmask_assist(of, tgt,
-								   nbytes, off);
-		}
-	}
-#endif
-
-	buf = strstrip(buf);
-
-	return cpuset_write_resmask(of, buf, nbytes, off);
 }
 
 /*
@@ -1914,7 +1891,7 @@ static struct cftype files[] = {
 	{
 		.name = "cpus",
 		.seq_show = cpuset_common_seq_show,
-		.write = cpuset_write_resmask_wrapper,
+		.write = cpuset_write_resmask,
 		.max_write_len = (100U + 6 * NR_CPUS),
 		.private = FILE_CPULIST,
 	},
