@@ -19,8 +19,7 @@
 #include <linux/ffsi.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
-#include <linux/sysctl.h>
-#include <linux/uidgid.h>
+
 
 #include <uapi/linux/sched/types.h>
 
@@ -1438,131 +1437,6 @@ static void __init aigov_cpufreq_init(void)
 exit:
 	pr_info("%s: failed to initialized slack_timer, pm_qos handler\n", __func__);
 }
-
-/* Boot Shield: freeze background processes during boot for faster startup */
-static int boot_shield __read_mostly = 1;
-static unsigned int boot_shield_groups __read_mostly = 0xF;
-static unsigned int boot_shield_timeout __read_mostly = 30;
-
-static struct ctl_table aigov_sysctl_table[] = {
-	{
-		.procname	= "boot_shield",
-		.data		= &boot_shield,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-	{
-		.procname	= "boot_shield_groups",
-		.data		= &boot_shield_groups,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= &proc_douintvec,
-	},
-	{
-		.procname	= "boot_shield_timeout",
-		.data		= &boot_shield_timeout,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= &proc_douintvec,
-	},
-	{ }
-};
-
-static void boot_shield_scan(struct work_struct *work);
-static DECLARE_DELAYED_WORK(boot_shield_work, boot_shield_scan);
-static int boot_shield_done;
-
-static void boot_shield_thaw(void)
-{
-	struct task_struct *p;
-	int thawed = 0;
-
-	rcu_read_lock();
-	for_each_process(p) {
-		if (p->flags & PF_KTHREAD)
-			continue;
-		if (p->state == TASK_KILLABLE || p->state == TASK_INTERRUPTIBLE)
-			continue;
-		if (p->state & TASK_STOPPED) {
-			send_sig(SIGCONT, p, 0);
-			thawed++;
-		}
-	}
-	rcu_read_unlock();
-
-	pr_info("boot_shield: thawed %d processes\n", thawed);
-}
-
-static void boot_shield_timeout_fn(struct work_struct *work)
-{
-	pr_info("boot_shield: timeout reached (%u s), thawing all\n",
-		boot_shield_timeout);
-	boot_shield_done = 1;
-	cancel_delayed_work_sync(&boot_shield_work);
-	boot_shield_thaw();
-}
-static DECLARE_DELAYED_WORK(boot_shield_timeout_work, boot_shield_timeout_fn);
-
-static void boot_shield_scan(struct work_struct *work)
-{
-	struct task_struct *p;
-	int uid, grp;
-	int stopped = 0;
-
-	if (boot_shield_done)
-		return;
-
-	rcu_read_lock();
-	for_each_process(p) {
-		if (p->flags & PF_KTHREAD)
-			continue;
-		uid = from_kuid_munged(current_user_ns(), task_uid(p));
-		if (uid < 10000)
-			continue;
-		grp = schedtune_task_group_idx(p);
-		if (grp < 0 || grp >= 32)
-			continue;
-		if (!(boot_shield_groups & (1U << grp)))
-			continue;
-		if (p->state & TASK_STOPPED)
-			continue;
-		send_sig(SIGSTOP, p, 0);
-		pr_info("boot_shield: SIGSTOP uid=%d pid=%d (%s)\n",
-			uid, task_pid_nr(p), p->comm);
-		stopped++;
-	}
-	rcu_read_unlock();
-
-	if (stopped)
-		pr_info("boot_shield: stopped %d processes this round\n", stopped);
-
-	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(2000));
-}
-
-static int boot_shield_initcall(void)
-{
-	struct ctl_table_header *hdr;
-
-	if (!boot_shield)
-		return 0;
-
-	pr_info("boot_shield: enabled, timeout=%u s, groups=0x%x\n",
-		boot_shield_timeout, boot_shield_groups);
-
-	hdr = register_sysctl_table(aigov_sysctl_table);
-	if (!hdr)
-		return -ENOMEM;
-
-	boot_shield_done = 0;
-
-	schedule_delayed_work(&boot_shield_work, msecs_to_jiffies(3000));
-	schedule_delayed_work(&boot_shield_timeout_work,
-			      msecs_to_jiffies(boot_shield_timeout * 1000));
-
-	return 0;
-}
-late_initcall(boot_shield_initcall);
 
 static int __init aigov_register(void)
 {
