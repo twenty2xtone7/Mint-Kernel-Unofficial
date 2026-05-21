@@ -454,18 +454,13 @@ static struct ctl_table sbalance_sysctl_table[] = {
 	{ }
 };
 
-static struct ctl_table sbalance_sysctl_dir[] = {
-	{ .procname = "sbalance", .mode = 0555, .child = sbalance_sysctl_table },
-	{ }
-};
-
 static int __init sbalance_init(void)
 {
 	pr_info("starting sbalance thread\n");
 	BUG_ON(IS_ERR(kthread_run(sbalance_thread, NULL, "sbalanced")));
 	pr_info("sbalance thread started\n");
 
-	register_sysctl("kernel", sbalance_sysctl_dir);
+	register_sysctl("kernel/sbalance", sbalance_sysctl_table);
 	return 0;
 }
 late_initcall(sbalance_init);
