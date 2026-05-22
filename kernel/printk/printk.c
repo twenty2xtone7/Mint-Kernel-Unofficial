@@ -987,8 +987,14 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 		}
 	}
 
-	if (unlikely(strncmp("healthd", line, 7) == 0 || strncmp("Trustonic TEE", line, 13) == 0))
-	{
+
+	if (strstr(line, "healthd") || strstr(line, "logd") ||
+	    strstr(line, "dashd")) {
+		kfree(buf);
+		return len;
+	}
+
+	if (unlikely(strncmp("Trustonic TEE", line, 13) == 0)) {
 		return len;
 	}
 
