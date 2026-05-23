@@ -430,7 +430,7 @@ static struct od_ops od_ops = {
 };
 
 static struct dbs_governor od_dbs_gov = {
-	.gov = CPUFREQ_DBS_GOVERNOR_INITIALIZER("sawit++"),
+	.gov = CPUFREQ_DBS_GOVERNOR_INITIALIZER("moonbeam"),
 	.kobj_type = { .default_attrs = od_attributes },
 	.gov_dbs_update = od_dbs_update,
 	.alloc = od_alloc,
