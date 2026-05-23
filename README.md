@@ -1,4 +1,4 @@
-![Mint branding](https://i.ibb.co/9WV53PD/Banner-New-Dark.png)
+![Mint branding](asset/Mint.png)
 
 # Mint Kernel Unofficial
 
