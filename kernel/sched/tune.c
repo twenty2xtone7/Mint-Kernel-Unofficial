@@ -611,8 +611,6 @@ heavy_boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 {
 	struct schedtune *st = css_st(css);
 
-	update_boost_write_log();
-
 #ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
 		return -EACCES;
@@ -642,8 +640,6 @@ busy_boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    s64 boost)
 {
 	struct schedtune *st = css_st(css);
-
-	update_boost_write_log();
 
 #ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
