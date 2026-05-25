@@ -2540,25 +2540,6 @@ static int __net_init tcp_sk_init(struct net *net)
 	net->ipv4.sysctl_tcp_sack = 1;
 	net->ipv4.sysctl_tcp_window_scaling= 1;
 	net->ipv4.sysctl_tcp_timestamps = 1;
-	net->ipv4.sysctl_tcp_early_retrans = 3;
-	net->ipv4.sysctl_tcp_recovery = TCP_RACK_LOSS_DETECTION;
-	net->ipv4.sysctl_tcp_slow_start_after_idle = 1; /* By default, RFC2861 behavior.  */
-	net->ipv4.sysctl_tcp_retrans_collapse = 1;
-	net->ipv4.sysctl_tcp_max_reordering = 300;
-	net->ipv4.sysctl_tcp_dsack = 1;
-	net->ipv4.sysctl_tcp_app_win = 31;
-	net->ipv4.sysctl_tcp_adv_win_scale = 1;
-	net->ipv4.sysctl_tcp_frto = 2;
-	net->ipv4.sysctl_tcp_moderate_rcvbuf = 1;
-	/* This limits the percentage of the congestion window which we
-	 * will allow a single TSO frame to consume.  Building TSO frames
-	 * which are too large can cause TCP streams to be bursty.
-	 */
-	net->ipv4.sysctl_tcp_tso_win_divisor = 3;
-	/* Default TSQ limit of four TSO segments */
-	net->ipv4.sysctl_tcp_limit_output_bytes = 16 * 65536;;
-	/* rfc5961 challenge ack rate limiting */
-	net->ipv4.sysctl_tcp_challenge_ack_limit = 1000;
 
 	net->ipv4.sysctl_tcp_mtu_probing = 1;
 

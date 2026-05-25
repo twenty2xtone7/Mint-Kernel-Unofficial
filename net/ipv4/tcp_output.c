@@ -1749,7 +1749,7 @@ static u32 tcp_tso_segs(struct sock *sk, unsigned int mss_now)
 	tso_segs = ca_ops->tso_segs ?
 		ca_ops->tso_segs(sk, mss_now) :
 		tcp_tso_autosize(sk, mss_now,
-				 sock_net(sk)->ipv4.sysctl_tcp_min_tso_segs);
+		sysctl_tcp_min_tso_segs);
 	return min_t(u32, tso_segs, sk->sk_gso_max_segs);
 }
 
@@ -2245,7 +2245,7 @@ static bool tcp_small_queue_check(struct sock *sk, const struct sk_buff *skb,
 	limit = max_t(unsigned long,
 		      2 * skb->truesize,
 		      sk->sk_pacing_rate >> READ_ONCE(sk->sk_pacing_shift));
-	limit = min_t(unsigned long, limit, sock_net(sk)->ipv4.sysctl_tcp_limit_output_bytes);
+	limit = min_t(unsigned long, limit, 	sysctl_tcp_limit_output_bytes);
 	limit <<= factor;
 
 	if (refcount_read(&sk->sk_wmem_alloc) > limit) {
