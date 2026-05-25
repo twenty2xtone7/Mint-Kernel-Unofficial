@@ -9,7 +9,9 @@
 
 #include <linux/sched.h>
 #include <linux/ems.h>
+#ifdef CONFIG_TASK_BLOCKLIST
 #include <linux/task_blocklist.h>
+#endif
 
 #include "ems.h"
 #include "../sched.h"
@@ -32,8 +34,10 @@ s64 ems_gpu_boost_freq_stune_hook_read(struct cgroup_subsys_state *css,
 
 int ems_gpu_boost_freq_stune_hook_write(struct cgroup_subsys_state *css,
 		             struct cftype *cft, s64 freq) {
+#ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
 		return -EACCES;
+#endif
 
 	if (freq < 0 || freq >= 2147483647)
 		return -EINVAL;

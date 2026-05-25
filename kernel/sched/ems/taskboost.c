@@ -8,7 +8,9 @@
 #include <linux/sched.h>
 #include <linux/kobject.h>
 #include <linux/ems.h>
+#ifdef CONFIG_TASK_BLOCKLIST
 #include <linux/task_blocklist.h>
+#endif
 
 #include "ems.h"
 #include "../sched.h"
@@ -86,8 +88,10 @@ static ssize_t store_global_boost(struct kobject *kobj,
 {
 	unsigned int input;
 
+#ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
 		return -EACCES;
+#endif
 
 	if (!sscanf(buf, "%d", &input))
 		return -EINVAL;
@@ -111,8 +115,10 @@ static ssize_t store_task_boost(struct kobject *kobj,
 {
 	int boost;
 
+#ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
 		return -EACCES;
+#endif
 
 	if (sscanf(buf, "%d", &boost) != 1)
 		return -EINVAL;
@@ -147,8 +153,10 @@ int ems_global_task_boost_stune_hook_write(struct cgroup_subsys_state *css,
 	struct schedtune *st = css_st(css);
 	int group_idx;
 
+#ifdef CONFIG_TASK_BLOCKLIST
 	if (task_is_blocklisted(current))
 		return -EACCES;
+#endif
 
 	if (enabled < 0 || enabled > 1)
 		return -EINVAL;
