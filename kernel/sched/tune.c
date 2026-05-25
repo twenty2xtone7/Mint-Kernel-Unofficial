@@ -37,6 +37,15 @@ static struct ctl_table boost_log_table[] = {
 	{}
 };
 
+static struct ctl_table boost_log_kern_table[] = {
+	{
+		.procname	= "kernel",
+		.mode		= 0555,
+		.child		= boost_log_table,
+	},
+	{}
+};
+
 static void update_boost_write_log(void)
 {
 	char buf[BOOST_WRITE_LOG_SIZE];
@@ -1040,7 +1049,7 @@ schedtune_init(void)
 
 	sysbusy_register_notifier(&schedtune_sysbusy_notifier);
 
-	boost_write_sysctl = register_sysctl_table(boost_log_table);
+	boost_write_sysctl = register_sysctl_table(boost_log_kern_table);
 
 	return 0;
 }
