@@ -4187,7 +4187,7 @@ retry:
 	if (gfp_mask & __GFP_NORETRY)
 		goto nopage;
   
-  cpu_input_boost_kick_max(150)
+  cpu_input_boost_kick_max(150);
   devfreq_boost_kick_max(DEVFREQ_EXYNOS_MIF, 150);
 	/*
 	 * Do not retry costly high order allocations unless they are
