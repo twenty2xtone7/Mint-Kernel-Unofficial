@@ -1,7 +1,6 @@
 #include <linux/cgroup.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
-#include <linux/task_blocklist.h>
 #include <linux/percpu.h>
 #include <linux/printk.h>
 #include <linux/rcupdate.h>
@@ -537,9 +536,6 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 {
 	struct schedtune *st = css_st(css);
 
-	if (task_is_blocklisted(current))
-		return -EACCES;
-
 	if (boost < 0 || boost > 100)
 		return -EINVAL;
 
@@ -570,9 +566,6 @@ heavy_boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 {
 	struct schedtune *st = css_st(css);
 
-	if (task_is_blocklisted(current))
-		return -EACCES;
-
 	if (boost < 0 || boost > 100)
 		return -EINVAL;
 
@@ -597,9 +590,6 @@ busy_boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    s64 boost)
 {
 	struct schedtune *st = css_st(css);
-
-	if (task_is_blocklisted(current))
-		return -EACCES;
 
 	if (boost < 0 || boost > 100)
 		return -EINVAL;
