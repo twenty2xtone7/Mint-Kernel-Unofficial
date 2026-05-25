@@ -57,6 +57,7 @@
 #include <linux/compat.h>
 #include <linux/kthread.h>
 #include <linux/task_io_accounting_ops.h>
+#include <linux/cpu_input_boost.h>
 #include <linux/rcupdate.h>
 #include <linux/ptrace.h>
 #include <linux/mount.h>
@@ -2378,10 +2379,11 @@ long _do_fork(unsigned long clone_flags,
 	int trace = 0;
 	long nr;
 
-	/* Boost DDR bus to the max for 50 ms when userspace launches an app */
-	if (task_is_zygote(current))
-		devfreq_boost_kick_max(DEVFREQ_EXYNOS_MIF, 50);
-
+	/* Boost CPU and DDR bus when userspace launches an app */
+	if (task_is_zygote(current)) {
+		cpu_input_boost_kick_max(150);
+		devfreq_boost_kick_max(DEVFREQ_EXYNOS_MIF, 150);
+	}
 	/*
 	 * Determine whether and which event to report to ptracer.  When
 	 * called from kernel_thread or CLONE_UNTRACED is explicitly
