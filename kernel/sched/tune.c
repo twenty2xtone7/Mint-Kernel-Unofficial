@@ -24,15 +24,13 @@ bool schedtune_initialized = false;
 static char boost_write_log[BOOST_WRITE_LOG_SIZE];
 static struct ctl_table_header *boost_write_sysctl;
 
-static int boost_write_log_proc(struct ctl_table *ctl, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos);
 static struct ctl_table boost_log_table[] = {
 	{
 		.procname	= "boost_write_log",
-		.data		= NULL,
+		.data		= boost_write_log,
 		.maxlen		= BOOST_WRITE_LOG_SIZE,
 		.mode		= 0444,
-		.proc_handler	= boost_write_log_proc,
+		.proc_handler	= proc_dostring,
 	},
 	{}
 };
@@ -53,24 +51,6 @@ static void update_boost_write_log(void)
 
 	len = snprintf(buf, sizeof(buf), "%s (%d)\n", current->comm, current->pid);
 	memcpy(boost_write_log, buf, min(len + 1, BOOST_WRITE_LOG_SIZE));
-}
-
-static int boost_write_log_proc(struct ctl_table *ctl, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	if (write)
-		return -EACCES;
-
-	if (!*lenp || *ppos > 0) {
-		*lenp = 0;
-		return 0;
-	}
-
-	*lenp = min(strlen(boost_write_log), (size_t)BOOST_WRITE_LOG_SIZE);
-	if (copy_to_user(buffer, boost_write_log, *lenp))
-		return -EFAULT;
-
-	return 0;
 }
 struct reciprocal_value schedtune_spc_rdiv;
 
