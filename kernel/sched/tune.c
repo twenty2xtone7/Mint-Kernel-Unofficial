@@ -23,6 +23,9 @@ bool schedtune_initialized = false;
 #define BOOST_WRITE_LOG_SIZE 256
 static char boost_write_log[BOOST_WRITE_LOG_SIZE];
 static struct ctl_table_header *boost_write_sysctl;
+
+static int boost_write_log_proc(struct ctl_table *ctl, int write,
+				void __user *buffer, size_t *lenp, loff_t *ppos);
 static struct ctl_table boost_log_table[] = {
 	{
 		.procname	= "boost_write_log",
