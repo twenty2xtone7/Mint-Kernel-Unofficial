@@ -1211,15 +1211,6 @@ config SCHED_TUNE
 
 	  Latency-sensitive tasks are not subject to energy-aware wakeup
 	  task placement. The boost value assigned to tasks is used to
-
-config TASK_BLOCKLIST
-	bool "Blocklist system daemons from tampering with boost values"
-	depends on SCHED_TUNE
-	default y
-	help
-	  Prevents known performance daemons (perfd, power HAL, etc.)
-	  from overwriting kernel-set cgroup boost values. The list of
-	  blocklisted processes is in include/linux/task_blocklist.h.
 	  influence task placement and CPU frequency selection (if
 	  utilization-driven frequency selection is in use).
 
