@@ -46,6 +46,7 @@ obj-$(CONFIG_INET_UDP_DIAG) += udp_diag.o
 obj-$(CONFIG_INET_RAW_DIAG) += raw_diag.o
 obj-$(CONFIG_NET_TCPPROBE) += tcp_probe.o
 obj-$(CONFIG_TCP_CONG_BBR) += tcp_bbr.o
+obj-$(CONFIG_TCP_CONG_BBRPLUS) += tcp_bbrplus.o
 obj-$(CONFIG_TCP_CONG_FLUX) += tcp_flux.o
 obj-$(CONFIG_TCP_CONG_SWIFT) += tcp_swift.o
 obj-$(CONFIG_TCP_CONG_BIC) += tcp_bic.o
