@@ -23,7 +23,7 @@ config BATTERY_BYPASS_CHARGE
 	depends on BATTERY_SAMSUNG_V2
 	help
 	 Say Y to include support for battery bypass charge.
-	 Adds /proc/sys/net/ipv4/battery_charge (1=charge, 0=bypass).
+	 Adds /proc/sys/kernel/battery_charge (1=charge, 0=bypass).
 	 In bypass mode the device runs on charger power without charging
 	 the battery.
 
