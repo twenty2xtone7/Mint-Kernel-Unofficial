@@ -38,6 +38,11 @@
 #include <linux/net.h>
 #include <linux/sysrq.h>
 #include <linux/highuid.h>
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+extern int sysctl_battery_charge;
+extern int battery_charge_sysctl_handler(struct ctl_table *, int,
+					 void __user *, size_t *, loff_t *);
+#endif
 #include <linux/writeback.h>
 #include <linux/ratelimit.h>
 #include <linux/compaction.h>
@@ -1658,6 +1663,17 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(sysctl_panic_on_rcu_stall),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &one,
+	},
+#endif
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+	{
+		.procname	= "battery_charge",
+		.data		= &sysctl_battery_charge,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= battery_charge_sysctl_handler,
 		.extra1		= &zero,
 		.extra2		= &one,
 	},

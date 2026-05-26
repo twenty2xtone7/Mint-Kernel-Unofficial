@@ -27,12 +27,6 @@
 #include <net/ping.h>
 #include <net/protocol.h>
 
-#ifdef CONFIG_BATTERY_BYPASS_CHARGE
-extern int sysctl_battery_charge;
-extern int battery_charge_sysctl_handler(struct ctl_table *, int,
-					 void __user *, size_t *, loff_t *);
-#endif
-
 static int zero;
 static int one = 1;
 static int four = 4;
@@ -532,17 +526,6 @@ static struct ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
-#ifdef CONFIG_BATTERY_BYPASS_CHARGE
-	{
-		.procname	= "battery_charge",
-		.data		= &sysctl_battery_charge,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= battery_charge_sysctl_handler,
-		.extra1		= &zero,
-		.extra2		= &one
-	},
-#endif
 	{
 		.procname	= "tcp_mem",
 		.maxlen		= sizeof(sysctl_tcp_mem),
