@@ -1020,7 +1020,7 @@ int sec_bat_set_charging_current(struct sec_battery_info *battery)
 }
 
 #ifdef CONFIG_BATTERY_BYPASS_CHARGE
-static int battery_charge_sysctl_handler(struct ctl_table *ctl, int write,
+int battery_charge_sysctl_handler(struct ctl_table *ctl, int write,
 					 void __user *buffer, size_t *lenp,
 					 loff_t *ppos)
 {
