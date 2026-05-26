@@ -78,10 +78,10 @@
 				battery,swelling_wc_low_temp_current = <850>;	/* 0.3C */
 				battery,swelling_wc_low_temp_current_2nd = <350>;	/* 0.3C */
 
-				battery,max_charging_current = <2400>;
+				battery,max_charging_current = <3200>;
 				battery,battery_full_capacity = <3300>;
 
-				battery,standard_curr = <2400>;
+				battery,standard_curr = <3200>;
 			};
 
 		/* sec_battery_cable
@@ -126,13 +126,13 @@
 
 				current_group_4 {
 					cable_number = <6 7 8>;
-					input_current = <1650>;
-					charging_current = <2400>;
+					input_current = <2000>;
+					charging_current = <3200>;
 				};
 				current_group_5 {
 					cable_number = <9>;
-					input_current = <1650>;
-					charging_current = <2400>;
+					input_current = <2000>;
+					charging_current = <3200>;
 				};
 			};
 		};

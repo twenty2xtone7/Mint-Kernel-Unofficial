@@ -277,7 +277,7 @@
 				battery,siop_hv_wireless_charging_limit_current = <700>;
 				battery,siop_store_hv_wireless_input_limit_current = <450>;
 
-				battery,ttf_hv_charge_current = <2170>;
+				battery,ttf_hv_charge_current = <3000>;
 				battery,ttf_hv_wireless_charge_current = <1050>;
 				battery,ttf_wireless_charge_current = <900>;
 
@@ -287,8 +287,8 @@
 				battery,rp_current_rdu_rp3 = <2100>;
 				battery,rp_current_abnormal_rp3 = <1800>;
 
-				battery,pd_charging_charge_power = <15000>;
-				battery,max_charging_current = <2400>;
+				battery,pd_charging_charge_power = <25000>;
+				battery,max_charging_current = <3200>;
 				battery,battery_full_capacity = <4000>;
 
 				/* cycle, chg_float_voltage, recharge_condition_vcell, full_condition_vcell, full_condition_soc */
@@ -314,7 +314,7 @@
 
 				battery,enable_water_resistance;
 
-				battery,standard_curr = <2400>;
+				battery,standard_curr = <3200>;
 				battery,expired_time = <11400>; /* 130 + 60 minutes */
 				battery,recharging_expired_time = <5400>;
 
@@ -372,8 +372,8 @@
 		 */
 
 			cable-info {
-				default_input_current = <1800>;
-				default_charging_current = <2100>;
+				default_input_current = <2200>;
+				default_charging_current = <2800>;
 				full_check_current_1st = <400>;
 				full_check_current_2nd = <200>;
 
@@ -394,13 +394,13 @@
 				};
 				current_group_4 {
 					cable_number = <6 7 8>;
-					input_current = <1650>;
-					charging_current = <2400>;
+					input_current = <2000>;
+					charging_current = <3200>;
 				};
 				current_group_5 {
 					cable_number = <9>;
-					input_current = <1650>;
-					charging_current = <2400>;
+					input_current = <2000>;
+					charging_current = <3200>;
 				};
 				current_group_6 {
 					cable_number = <10 12 15 27 33>;
