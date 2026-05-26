@@ -15,12 +15,18 @@
 
 #include <linux/sec_ext.h>
 #include <linux/sec_debug.h>
+#include <linux/sysctl.h>
 
 #if defined(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
 #endif
 
 bool sleep_mode = false;
+
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+int sysctl_battery_charge __read_mostly = 1;
+struct sec_battery_info *g_battery;
+#endif
 
 static enum power_supply_property sec_battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
@@ -1013,6 +1019,23 @@ int sec_bat_set_charging_current(struct sec_battery_info *battery)
 	return 0;
 }
 
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+static int battery_charge_sysctl_handler(struct ctl_table *ctl, int write,
+					 void __user *buffer, size_t *lenp,
+					 loff_t *ppos)
+{
+	int ret = proc_dointvec_minmax(ctl, write, buffer, lenp, ppos);
+
+	if (write && !ret && g_battery) {
+		if (sysctl_battery_charge)
+			sec_bat_set_charge(g_battery, SEC_BAT_CHG_MODE_CHARGING);
+		else
+			sec_bat_set_charge(g_battery, SEC_BAT_CHG_MODE_CHARGING_OFF);
+	}
+	return ret;
+}
+#endif
+
 int sec_bat_set_charge(struct sec_battery_info *battery,
 			int chg_mode)
 {
@@ -1029,6 +1052,17 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 		dev_info(battery->dev, "%s: charge disable by HMT or SOC\n", __func__);
 		chg_mode = SEC_BAT_CHG_MODE_CHARGING_OFF;
 	}
+
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+	/* When bypass active and no charger present, keep Q4 ON so battery powers the system */
+	if (!sysctl_battery_charge && is_nocharge_type(battery->cable_type) &&
+	    chg_mode == SEC_BAT_CHG_MODE_CHARGING_OFF)
+		chg_mode = SEC_BAT_CHG_MODE_CHARGING;
+
+	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING &&
+	    !is_nocharge_type(battery->cable_type))
+		chg_mode = SEC_BAT_CHG_MODE_CHARGING_OFF;
+#endif
 
 	battery->charger_mode = chg_mode;
 	pr_info("%s set %s mode\n", __func__, sec_bat_charge_mode_str[chg_mode]);
@@ -6756,6 +6790,9 @@ static int sec_battery_probe(struct platform_device *pdev)
 	battery = kzalloc(sizeof(*battery), GFP_KERNEL);
 	if (!battery)
 		return -ENOMEM;
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+	g_battery = battery;
+#endif
 
 	if (pdev->dev.of_node) {
 		pdata = devm_kzalloc(&pdev->dev,

@@ -17,6 +17,16 @@ config BATTERY_SAMSUNG_V2
 	 To see battery-related functions,
 	 refer to sec_charging_common.h
 
+config BATTERY_BYPASS_CHARGE
+	bool "battery bypass charge support"
+	default n
+	depends on BATTERY_SAMSUNG_V2
+	help
+	 Say Y to include support for battery bypass charge.
+	 Adds /proc/sys/net/ipv4/battery_charge (1=charge, 0=bypass).
+	 In bypass mode the device runs on charger power without charging
+	 the battery.
+
 config BATTERY_SWELLING
 	bool "prevent battery swelling"
 	help
