@@ -1072,6 +1072,18 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING &&
 	    !is_nocharge_type(battery->cable_type))
 		chg_mode = SEC_BAT_CHG_MODE_CHARGING_OFF;
+
+	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING_OFF) {
+		union power_supply_propval bval = {0, };
+		bval.intval = 1;
+		psy_do_property(battery->pdata->charger_name, set,
+			POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, bval);
+	} else if (!sysctl_battery_charge) {
+		union power_supply_propval bval = {0, };
+		bval.intval = 0;
+		psy_do_property(battery->pdata->charger_name, set,
+			POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, bval);
+	}
 #endif
 
 	battery->charger_mode = chg_mode;
