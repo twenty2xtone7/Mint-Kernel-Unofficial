@@ -975,6 +975,10 @@ int sec_bat_set_charging_current(struct sec_battery_info *battery)
 		battery->charging_current = charging_current;
 	}
 	/* set input current, charging current */
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+	if (!sysctl_battery_charge)
+		charging_current = 0;
+#endif
 	if ((battery->input_current != input_current) ||
 		(battery->charging_current != charging_current)) {
 		/* update charge power */
@@ -1075,9 +1079,11 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 
 	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING_OFF) {
 		union power_supply_propval bval = {0, };
+		battery->status = POWER_SUPPLY_STATUS_NOT_CHARGING;
 		bval.intval = 1;
 		psy_do_property(battery->pdata->charger_name, set,
 			POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, bval);
+		power_supply_changed(battery->psy_bat);
 	} else if (!sysctl_battery_charge) {
 		union power_supply_propval bval = {0, };
 		bval.intval = 0;
