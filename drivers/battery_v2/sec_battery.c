@@ -367,7 +367,7 @@ static void sec_bat_get_charging_current_by_siop(struct sec_battery_info *batter
 				max_charging_current = 500;
 			}
 		} else {
-			max_charging_current = 1800; /* 1 step(70) */
+			max_charging_current = 3200; /* 1 step(70) */
 		}
 
 		/* do forced set charging current */
@@ -394,8 +394,8 @@ static void sec_bat_get_charging_current_by_siop(struct sec_battery_info *batter
 			}
 #if defined(CONFIG_CCIC_NOTIFIER)
 		} else if (is_pd_wire_type(battery->cable_type)) {
-			if (*input_current > (6000 / battery->input_voltage))
-				*input_current = 6000 / battery->input_voltage;
+			if (*input_current > (battery->pdata->pd_charging_charge_power / battery->input_voltage))
+				*input_current = battery->pdata->pd_charging_charge_power / battery->input_voltage;
 #endif
 		} else {
 			if (battery->siop_level == 20 && battery->pdata->input_current_by_siop_20 > 0) {
@@ -1027,10 +1027,19 @@ int battery_charge_sysctl_handler(struct ctl_table *ctl, int write,
 	int ret = proc_dointvec_minmax(ctl, write, buffer, lenp, ppos);
 
 	if (write && !ret && g_battery) {
-		if (sysctl_battery_charge)
+		if (sysctl_battery_charge) {
+			union power_supply_propval val = {0, };
+			val.intval = 0;
+			psy_do_property(g_battery->pdata->charger_name, set,
+				POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, val);
 			sec_bat_set_charge(g_battery, SEC_BAT_CHG_MODE_CHARGING);
-		else
+		} else {
+			union power_supply_propval val = {0, };
 			sec_bat_set_charge(g_battery, SEC_BAT_CHG_MODE_CHARGING_OFF);
+			val.intval = 1;
+			psy_do_property(g_battery->pdata->charger_name, set,
+				POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, val);
+		}
 	}
 	return ret;
 }
@@ -1054,11 +1063,12 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 	}
 
 #ifdef CONFIG_BATTERY_BYPASS_CHARGE
-	/* When bypass active and no charger present, keep Q4 ON so battery powers the system */
+	/* unplug with bypass active: keep Q4 ON so battery powers the phone */
 	if (!sysctl_battery_charge && is_nocharge_type(battery->cable_type) &&
 	    chg_mode == SEC_BAT_CHG_MODE_CHARGING_OFF)
 		chg_mode = SEC_BAT_CHG_MODE_CHARGING;
 
+	/* plug with bypass active: keep Q4 OFF so battery is isolated */
 	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING &&
 	    !is_nocharge_type(battery->cable_type))
 		chg_mode = SEC_BAT_CHG_MODE_CHARGING_OFF;

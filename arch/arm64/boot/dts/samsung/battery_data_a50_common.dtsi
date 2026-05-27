@@ -211,7 +211,7 @@
 				battery,wpc_store_lcd_on_high_temp_rec = <300>;
 				battery,wpc_store_lcd_on_charging_limit_current = <400>;
 
-				battery,sleep_mode_limit_current = <500>;
+				battery,sleep_mode_limit_current = <3200>;
 				battery,wc_full_input_limit_current = <100>;
 
 				battery,mix_high_temp = <420>;
@@ -240,21 +240,23 @@
 				battery,chg_float_voltage = <4350>;
 				battery,chg_ocp_current = <4500>;
 
-				battery,swelling_high_temp_block = <410>;
-				battery,swelling_high_temp_recov = <390>;
-				battery,swelling_low_temp_block_1st = <150>;
-				battery,swelling_low_temp_recov_1st = <170>;
-				battery,swelling_low_temp_block_2nd = <50>;
-				battery,swelling_low_temp_recov_2nd = <70>;
+				battery,swelling_high_temp_block = <500>;
+				battery,swelling_high_temp_recov = <480>;
+				battery,swelling_low_temp_block_1st = <0>;
+				battery,swelling_low_temp_recov_1st = <10>;
+				battery,swelling_low_temp_block_2nd = <0>;
+				battery,swelling_low_temp_recov_2nd = <10>;
 
-				battery,swelling_low_temp_current = <900>;	/* 0.3C */
-				battery,swelling_low_temp_current_2nd = <350>;	/* 0.1C */
+				battery,swelling_low_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_low_temp_current_2nd = <3200>;	/* 0.1C */
 				battery,swelling_low_temp_topoff = <200>;	/* 0.05C */
-				battery,swelling_high_temp_current = <1400>;	/* 0.45C */
+
+				battery,swelling_high_temp_current = <3200>;	/* 0.45C */
 				battery,swelling_high_temp_topoff = <200>;	/* 0.05C */
-				battery,swelling_wc_high_temp_current = <900>;	/* 0.3C */
-				battery,swelling_wc_low_temp_current = <900>;	/* 0.3C */
-				battery,swelling_wc_low_temp_current_2nd = <350>;	/* 0.3C */
+
+				battery,swelling_wc_high_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_wc_low_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_wc_low_temp_current_2nd = <3200>;	/* 0.3C */
 
 				battery,swelling_drop_float_voltage = <4150>;
 				battery,swelling_high_rechg_voltage = <4000>;
@@ -264,18 +266,18 @@
 				battery,siop_call_cv_current = <330>;
 				battery,siop_call_cc_current = <330>;
 
-				battery,siop_input_limit_current = <1200>;
-				battery,siop_charging_limit_current = <1000>;
-				battery,siop_hv_input_limit_current = <700>;
-				battery,siop_hv_charging_limit_current = <1000>;
+				battery,siop_input_limit_current = <3200>;
+				battery,siop_charging_limit_current = <3200>;
+				battery,siop_hv_input_limit_current = <3200>;
+				battery,siop_hv_charging_limit_current = <3200>;
 
-				battery,input_current_by_siop_20 = <1000>;
+				battery,input_current_by_siop_20 = <3200>;
 
-				battery,siop_wireless_input_limit_current = <600>;
-				battery,siop_wireless_charging_limit_current = <700>;
-				battery,siop_hv_wireless_input_limit_current = <600>;
-				battery,siop_hv_wireless_charging_limit_current = <700>;
-				battery,siop_store_hv_wireless_input_limit_current = <450>;
+				battery,siop_wireless_input_limit_current = <3200>;
+				battery,siop_wireless_charging_limit_current = <3200>;
+				battery,siop_hv_wireless_input_limit_current = <3200>;
+				battery,siop_hv_wireless_charging_limit_current = <3200>;
+				battery,siop_store_hv_wireless_input_limit_current = <3200>;
 
 				battery,ttf_hv_charge_current = <3000>;
 				battery,ttf_hv_wireless_charge_current = <1050>;

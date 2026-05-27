@@ -69,14 +69,14 @@
 			};
 
 			battery {
-				battery,swelling_low_temp_current = <850>;	/* 0.3C */
-				battery,swelling_low_temp_current_2nd = <350>;	/* 0.1C */
+				battery,swelling_low_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_low_temp_current_2nd = <3200>;	/* 0.1C */
 				battery,swelling_low_temp_topoff = <200>;	/* 0.05C */
-				battery,swelling_high_temp_current = <1250>;	/* 0.45C */
+				battery,swelling_high_temp_current = <3200>;	/* 0.45C */
 				battery,swelling_high_temp_topoff = <200>;	/* 0.05C */
-				battery,swelling_wc_high_temp_current = <850>;	/* 0.3C */
-				battery,swelling_wc_low_temp_current = <850>;	/* 0.3C */
-				battery,swelling_wc_low_temp_current_2nd = <350>;	/* 0.3C */
+				battery,swelling_wc_high_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_wc_low_temp_current = <3200>;	/* 0.3C */
+				battery,swelling_wc_low_temp_current_2nd = <3200>;	/* 0.3C */
 
 				battery,max_charging_current = <3200>;
 				battery,battery_full_capacity = <3300>;
