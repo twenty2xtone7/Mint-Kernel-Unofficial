@@ -991,14 +991,22 @@ int sec_bat_set_charging_current(struct sec_battery_info *battery)
 			POWER_SUPPLY_PROP_CURRENT_MAX, value);
 		battery->input_current = input_current;
 
-		value.intval = charging_current;
-		psy_do_property(battery->pdata->charger_name, set,
-			POWER_SUPPLY_PROP_CURRENT_NOW, value);
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+		if (!sysctl_battery_charge) {
+			battery->charging_current = 0;
+			battery->current_now = 0;
+		} else
+#endif
+		{
+			value.intval = charging_current;
+			psy_do_property(battery->pdata->charger_name, set,
+				POWER_SUPPLY_PROP_CURRENT_NOW, value);
 
-		if (charging_current <= 100)
-			battery->charging_current = 100;
-		else
-			battery->charging_current = charging_current;
+			if (charging_current <= 100)
+				battery->charging_current = 100;
+			else
+				battery->charging_current = charging_current;
+		}
 		pr_info("%s: power(%d), input(%d), charge(%d)\n", __func__,
 			battery->charge_power, battery->input_current, battery->charging_current);
 	}
@@ -1079,16 +1087,21 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 
 	if (!sysctl_battery_charge && chg_mode == SEC_BAT_CHG_MODE_CHARGING_OFF) {
 		union power_supply_propval bval = {0, };
-		battery->status = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		battery->status = POWER_SUPPLY_STATUS_CHARGING;
+		battery->charging_current = 0;
+		battery->current_now = 0;
+		battery->current_avg = 0;
 		bval.intval = 1;
 		psy_do_property(battery->pdata->charger_name, set,
 			POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, bval);
 		power_supply_changed(battery->psy_bat);
 	} else if (!sysctl_battery_charge) {
 		union power_supply_propval bval = {0, };
+		sysctl_battery_charge = 1;
 		bval.intval = 0;
 		psy_do_property(battery->pdata->charger_name, set,
 			POWER_SUPPLY_PROP_INPUT_VOLTAGE_REGULATION, bval);
+		pr_info("%s: bypass ended on unplug, sysctl reset to 1\n", __func__);
 	}
 #endif
 
@@ -5207,9 +5220,19 @@ static int sec_bat_get_property(struct power_supply *psy,
 		val->intval = battery->voltage_avg * 1000;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+		if (!sysctl_battery_charge)
+			val->intval = 0;
+		else
+#endif
 		val->intval = battery->current_now;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
+#ifdef CONFIG_BATTERY_BYPASS_CHARGE
+		if (!sysctl_battery_charge)
+			val->intval = 0;
+		else
+#endif
 		val->intval = battery->current_avg;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
